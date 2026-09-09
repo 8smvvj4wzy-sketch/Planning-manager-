@@ -84,7 +84,9 @@ export {
   datesDeLaPeriode,
   finDeLaPeriode,
   jourDeLaPeriode,
+  comparePeriodes,
   reparePeriode,
+  type DifferenceJournee,
   type JourneeReparee,
   type ReparationPeriode,
 } from './moteur/periode.ts';

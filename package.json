@@ -21,7 +21,11 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.check.json",
     "test": "node --test test/*.test.ts",
-    "valider": "node scripts/valider.ts"
+    "valider": "node scripts/valider.ts",
+    "dev": "vite",
+    "build:interface": "vite build",
+    "preview": "vite preview",
+    "verifier": "./verifier.sh"
   },
   "dependencies": {
     "ajv": "^8.17.1",

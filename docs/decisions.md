@@ -259,3 +259,23 @@ Quatre points qui ont demandé une décision :
 24 h se décale d'une heure au passage à l'heure d'hiver, et une série de journées finit
 par sauter ou répéter un jour. Les dates du modèle sont des jours calendaires, pas des
 instants — `src/dates.ts` ne fait rien d'autre que tenir cette distinction.
+
+## 8. Un planning enregistré est figé
+
+Un planning produit et affiché a été imprimé, affiché au mur, annoncé à l'équipe. Il ne
+doit plus bouger — même si la structure évolue ensuite. C'est pourquoi un scénario
+enregistré garde **deux choses** : la situation saisie (« Lucas absent du 14 au 19 ») et
+le gel, c'est-à-dire le résultat tel qu'il a été produit.
+
+Rouvrir un planning enregistré affiche le gel, sans relancer le moteur : sinon ce ne
+serait plus le planning enregistré. « Recalculer » relance le calcul **à côté** et
+`comparePeriodes` dit ce qui aurait changé — quelles journées, quels créneaux, quels
+jeunes. Rien n'est écrasé.
+
+Quand la structure a changé de version depuis l'enregistrement, l'écran le signale avant
+tout le reste : un gel calculé sur une autre structure ne se compare pas naïvement, les
+identifiants ont pu changer de sens.
+
+Le stockage est local (`planning-ime:scenarios`), comme tout le reste. Une semaine gelée
+pèse quelques dizaines de Ko ; le repli IndexedDB ne se justifierait qu'au-delà de ~2 Mo
+cumulés, soit une centaine de scénarios. À surveiller, pas à anticiper.

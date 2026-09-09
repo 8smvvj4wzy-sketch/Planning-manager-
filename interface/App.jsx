@@ -20,37 +20,38 @@ import {
   CircleAlert,
   Download,
   FileJson,
+  GitCompare,
   Grid3x3,
   Info,
   Moon,
   Pin,
   Printer,
   RefreshCw,
+  Save,
   Settings,
   Sun,
   Trash2,
   Upload,
+  Library,
   Users,
   Wrench,
   X,
 } from 'lucide-react';
 
 import {
-  JOURS,
   Referentiel,
   auditeJourNominal,
-  catalogue,
-  construitEtatJour,
-  educateursLibres,
   calculDisponibilite,
+  catalogue,
+  comparePeriodes,
+  educateursLibres,
   etatJourNominal,
   jeunesSansAffectation,
-  jourDeLaDate,
   optionsAvec,
   planningTypeDuJour,
-  repare,
+  reparePeriode,
   sallesLibres,
-  valideJour,
+  validePeriode,
   valideStructure,
 } from '../src/index.ts';
 
@@ -80,7 +81,8 @@ const PALETTE = [CAT_INDIGO, CAT_TEAL, CAT_AMBER, CAT_VIOLET, CAT_CYAN, CAT_CORA
 
 const PREFIXE = 'planning-ime:';
 const CLE_STRUCTURE = `${PREFIXE}structure`;
-const CLE_JOUR = `${PREFIXE}jour`;
+const CLE_PERIODE = `${PREFIXE}periode`;
+const CLE_SCENARIOS = `${PREFIXE}scenarios`;
 const CLE_OPTIONS = `${PREFIXE}options`;
 const CLE_THEME = `${PREFIXE}theme`;
 const CLE_ACCENT = `${PREFIXE}accent`;
@@ -376,7 +378,8 @@ function ListeProblemes({ problemes, limite = 50 }) {
 
 const DESTINATIONS = [
   { id: 'planning', nom: 'Planning', icone: Grid3x3 },
-  { id: 'journee', nom: 'Journée', icone: CalendarDays },
+  { id: 'periode', nom: 'Période', icone: CalendarDays },
+  { id: 'plannings', nom: 'Plannings', icone: Library },
   { id: 'regles', nom: 'Règles', icone: Wrench },
   { id: 'structure', nom: 'Structure', icone: Users },
   { id: 'fichiers', nom: 'Fichiers', icone: FileJson },
@@ -733,21 +736,34 @@ function DetailCreneau({ referentiel, planning, creneauId, violations, conflit, 
 
 /* ==================== Écran Planning ==================== */
 
-function EcranPlanning({ referentiel, jourAffiche, setJourAffiche, axe, setAxe, source, setSource, reparation, options }) {
+function EcranPlanning({
+  referentiel,
+  jourAffiche,
+  setJourAffiche,
+  axe,
+  setAxe,
+  source,
+  setSource,
+  resultat,
+  dateAffichee,
+  setDateAffichee,
+  options,
+}) {
   const [creneauOuvert, setCreneauOuvert] = useState(null);
 
-  /* Deux plannings possibles : le planning type du jour (la référence, ce qui
-     tourne quand tout le monde est là) et la journée réparée. Le second
-     n'existe que si une réparation a été lancée pour ce jour-là. */
-  const reparationDuJour = reparation && reparation.planning.jour === jourAffiche ? reparation : null;
-  const montreReparation = source === 'reparation' && reparationDuJour;
+  /* Deux plannings possibles : le planning type d'un jour de la semaine (la
+     référence, ce qui tourne quand tout le monde est là) et une journée datée
+     de la série réparée. La seconde n'existe qu'après une analyse. */
+  const journee = resultat?.journees.find((j) => j.date === dateAffichee) ?? null;
+  const montreReparation = source === 'reparation' && journee;
 
   const planning = useMemo(
-    () => (montreReparation ? reparationDuJour.planning : planningTypeDuJour(referentiel, jourAffiche)),
-    [montreReparation, reparationDuJour, referentiel, jourAffiche],
+    () => (montreReparation ? journee.reparation.planning : planningTypeDuJour(referentiel, jourAffiche)),
+    [montreReparation, journee, referentiel, jourAffiche],
   );
 
-  const etat = useMemo(() => etatJourNominal(jourAffiche), [jourAffiche]);
+  const jourDuPlanning = montreReparation ? journee.jour : jourAffiche;
+  const etat = useMemo(() => etatJourNominal(jourDuPlanning), [jourDuPlanning]);
 
   /* Audit du planning type : sans réparation affichée, on montre quand même
      ce que le jour de référence viole déjà. */
@@ -756,8 +772,8 @@ function EcranPlanning({ referentiel, jourAffiche, setJourAffiche, axe, setAxe, 
     [montreReparation, referentiel, jourAffiche, options],
   );
 
-  const violations = montreReparation ? reparationDuJour.violations : (audit?.violations ?? []);
-  const conflits = montreReparation ? reparationDuJour.conflits : (audit?.conflits ?? []);
+  const violations = montreReparation ? journee.reparation.violations : (audit?.violations ?? []);
+  const conflits = montreReparation ? journee.reparation.conflits : (audit?.conflits ?? []);
 
   const signalements = useMemo(() => {
     const m = new Map();
@@ -814,20 +830,34 @@ function EcranPlanning({ referentiel, jourAffiche, setJourAffiche, axe, setAxe, 
                 { valeur: 'type', libelle: 'Planning type' },
                 {
                   valeur: 'reparation',
-                  libelle: reparationDuJour ? 'Journée réparée' : 'Journée réparée (aucune)',
+                  libelle: resultat ? 'Journée analysée' : 'Journée analysée (aucune)',
                 },
               ]}
             />
           </Champ>
         </div>
+        {source === 'reparation' && resultat && (
+          <div className="w-56">
+            <Champ libelle="Date">
+              <Selecteur
+                valeur={dateAffichee ?? ''}
+                onChange={setDateAffichee}
+                options={resultat.journees.map((j) => ({
+                  valeur: j.date,
+                  libelle: `${j.date} — ${j.jour}${j.nominale ? '' : ' ·  réorganisée'}`,
+                }))}
+              />
+            </Champ>
+          </div>
+        )}
         <Bouton icone={Printer} onClick={imprimer}>
           Imprimer
         </Bouton>
       </div>
 
-      {source === 'reparation' && !reparationDuJour && (
-        <Bandeau ton="info" icone={Info} titre="Aucune journée réparée pour ce jour">
-          Passez par l’écran Journée : saisissez la date et les absences, puis lancez la réparation.
+      {source === 'reparation' && !journee && (
+        <Bandeau ton="info" icone={Info} titre="Aucune journée analysée">
+          Passez par l’écran Période : saisissez les dates et les absences, puis lancez l’analyse.
         </Bandeau>
       )}
 
@@ -842,10 +872,14 @@ function EcranPlanning({ referentiel, jourAffiche, setJourAffiche, axe, setAxe, 
       <div className="chemin-impression">
         <Carte
           className="zone-impression"
-          titre={`${jourAffiche.charAt(0).toUpperCase()}${jourAffiche.slice(1)} — ${montreReparation ? 'journée réparée' : 'planning type'}`}
+          titre={
+            montreReparation
+              ? `${classeDate(journee.date)} — journée réorganisée`
+              : `${jourAffiche.charAt(0).toUpperCase()}${jourAffiche.slice(1)} — planning type`
+          }
           sousTitre={
             montreReparation
-              ? `${reparationDuJour.changements.length} changement(s), coût ${reparationDuJour.cout}`
+              ? `${journee.reparation.changements.length} changement(s), coût ${journee.reparation.cout}`
               : `${planning.creneaux.length} créneaux, ${referentiel.grille.nbPas} pas de ${referentiel.grille.pasMinutes} min`
           }
         >
@@ -943,6 +977,11 @@ function EcranPlanning({ referentiel, jourAffiche, setJourAffiche, axe, setAxe, 
 /* ==================== Écran Journée ====================
    Le fichier jour.json : absences, renforts, épingles. Il ne circule pas —
    c'est le seul endroit où l'on saisit ce qui change aujourd'hui. */
+/* ==================== Écran Période ====================
+   Une situation qui dure — « Lucas absent jusqu'au 19 » — et la série de
+   plannings qu'elle appelle, jusqu'au retour au fonctionnement initial.
+   Ce fichier ne circule pas : c'est le seul endroit où l'on saisit ce qui
+   change. */
 
 function LigneAbsence({ referentiel, absence, index, onChange, onSupprimer }) {
   const gens =
@@ -950,196 +989,279 @@ function LigneAbsence({ referentiel, absence, index, onChange, onSupprimer }) {
       ? referentiel.structure.jeunes.map((j) => ({ valeur: j.id, libelle: j.initiales }))
       : referentiel.structure.educateurs.map((e) => ({ valeur: e.id, libelle: referentiel.libelleEducateur(e.id) }));
 
-  const journee = absence.journee === true;
+  const journee = absence.journee === true || (!absence.debut && !absence.fin);
+
+  const maj = (suite) => onChange(index, suite);
 
   return (
-    <div className="flex flex-wrap items-end gap-2 rounded-xl border p-3" style={{ borderColor: 'var(--border)' }}>
-      <div className="w-32">
-        <Champ libelle="Qui">
-          <Selecteur
-            valeur={absence.type}
-            onChange={(type) => onChange(index, { type, id: '', journee: true })}
-            options={[
-              { valeur: 'educateur', libelle: 'Éducateur' },
-              { valeur: 'jeune', libelle: 'Jeune' },
-            ]}
-          />
-        </Champ>
+    <div className="rounded-xl border p-3" style={{ borderColor: 'var(--border)' }}>
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="w-32">
+          <Champ libelle="Qui">
+            <Selecteur
+              valeur={absence.type}
+              onChange={(type) => maj({ type, id: '', du: absence.du, au: absence.au, journee: true })}
+              options={[
+                { valeur: 'educateur', libelle: 'Éducateur' },
+                { valeur: 'jeune', libelle: 'Jeune' },
+              ]}
+            />
+          </Champ>
+        </div>
+        <div className="w-44">
+          <Champ libelle="Personne">
+            <Selecteur
+              valeur={absence.id}
+              onChange={(id) => maj({ ...absence, id })}
+              options={[{ valeur: '', libelle: '— choisir —' }, ...gens]}
+            />
+          </Champ>
+        </div>
+        <div className="w-40">
+          <Champ libelle="À partir du">
+            <input
+              type="date"
+              className="w-full rounded-xl border px-3 py-2 text-sm"
+              style={styleSaisie}
+              value={absence.du ?? ''}
+              onChange={(e) => maj({ ...absence, du: e.target.value })}
+            />
+          </Champ>
+        </div>
+        <div className="w-40">
+          <Champ libelle="Jusqu’au" aide={absence.au ? undefined : 'vide = jusqu’à nouvel ordre'}>
+            <input
+              type="date"
+              className="w-full rounded-xl border px-3 py-2 text-sm"
+              style={styleSaisie}
+              value={absence.au ?? ''}
+              onChange={(e) => {
+                const suite = { ...absence };
+                if (e.target.value) suite.au = e.target.value;
+                else delete suite.au;
+                maj(suite);
+              }}
+            />
+          </Champ>
+        </div>
+        <Bouton variante="danger" icone={Trash2} onClick={() => onSupprimer(index)}>
+          Retirer
+        </Bouton>
       </div>
-      <div className="w-44">
-        <Champ libelle="Personne">
-          <Selecteur
-            valeur={absence.id}
-            onChange={(id) => onChange(index, { ...absence, id })}
-            options={[{ valeur: '', libelle: '— choisir —' }, ...gens]}
-          />
-        </Champ>
+
+      <div className="mt-2 flex flex-wrap items-end gap-2">
+        <div className="w-44">
+          <Champ libelle="Chaque jour">
+            <Selecteur
+              valeur={journee ? 'journee' : 'partielle'}
+              onChange={(v) => {
+                const base = { type: absence.type, id: absence.id, du: absence.du };
+                if (absence.au) base.au = absence.au;
+                if (absence.motif) base.motif = absence.motif;
+                maj(
+                  v === 'journee'
+                    ? { ...base, journee: true }
+                    : { ...base, debut: absence.debut ?? '13:00', fin: absence.fin ?? '16:30' },
+                );
+              }}
+              options={[
+                { valeur: 'journee', libelle: 'Toute la journée' },
+                { valeur: 'partielle', libelle: 'Sur une plage horaire' },
+              ]}
+            />
+          </Champ>
+        </div>
+        {!journee && (
+          <>
+            <div className="w-28">
+              <Champ libelle="De">
+                <input
+                  type="time"
+                  step="300"
+                  className="w-full rounded-xl border px-3 py-2 text-sm"
+                  style={styleSaisie}
+                  value={absence.debut ?? ''}
+                  onChange={(e) => maj({ ...absence, debut: e.target.value })}
+                />
+              </Champ>
+            </div>
+            <div className="w-28">
+              <Champ libelle="À">
+                <input
+                  type="time"
+                  step="300"
+                  className="w-full rounded-xl border px-3 py-2 text-sm"
+                  style={styleSaisie}
+                  value={absence.fin ?? ''}
+                  onChange={(e) => maj({ ...absence, fin: e.target.value })}
+                />
+              </Champ>
+            </div>
+          </>
+        )}
+        <div className="min-w-[12rem] flex-1">
+          <Champ libelle="Motif">
+            <input
+              type="text"
+              className="w-full rounded-xl border px-3 py-2 text-sm"
+              style={styleSaisie}
+              value={absence.motif ?? ''}
+              placeholder="facultatif"
+              onChange={(e) => {
+                const suite = { ...absence };
+                if (e.target.value) suite.motif = e.target.value;
+                else delete suite.motif;
+                maj(suite);
+              }}
+            />
+          </Champ>
+        </div>
       </div>
-      <div className="w-40">
-        <Champ libelle="Étendue">
-          <Selecteur
-            valeur={journee ? 'journee' : 'partielle'}
-            onChange={(v) =>
-              onChange(
-                index,
-                v === 'journee'
-                  ? { type: absence.type, id: absence.id, journee: true, ...(absence.motif ? { motif: absence.motif } : {}) }
-                  : {
-                      type: absence.type,
-                      id: absence.id,
-                      debut: absence.debut ?? referentiel.structure.grille.debut,
-                      fin: absence.fin ?? referentiel.structure.grille.fin,
-                      ...(absence.motif ? { motif: absence.motif } : {}),
-                    },
-              )
-            }
-            options={[
-              { valeur: 'journee', libelle: 'Journée entière' },
-              { valeur: 'partielle', libelle: 'Sur une plage' },
-            ]}
-          />
-        </Champ>
-      </div>
-      {!journee && (
-        <>
-          <div className="w-28">
-            <Champ libelle="De">
-              <input
-                type="time"
-                step="1800"
-                className="w-full rounded-xl border px-3 py-2 text-sm"
-                style={styleSaisie}
-                value={absence.debut ?? ''}
-                onChange={(e) => onChange(index, { ...absence, debut: e.target.value })}
-              />
-            </Champ>
-          </div>
-          <div className="w-28">
-            <Champ libelle="À">
-              <input
-                type="time"
-                step="1800"
-                className="w-full rounded-xl border px-3 py-2 text-sm"
-                style={styleSaisie}
-                value={absence.fin ?? ''}
-                onChange={(e) => onChange(index, { ...absence, fin: e.target.value })}
-              />
-            </Champ>
-          </div>
-        </>
-      )}
-      <div className="min-w-[10rem] flex-1">
-        <Champ libelle="Motif">
-          <input
-            type="text"
-            className="w-full rounded-xl border px-3 py-2 text-sm"
-            style={styleSaisie}
-            value={absence.motif ?? ''}
-            placeholder="facultatif"
-            onChange={(e) => {
-              const motif = e.target.value;
-              const suite = { ...absence };
-              if (motif) suite.motif = motif;
-              else delete suite.motif;
-              onChange(index, suite);
-            }}
-          />
-        </Champ>
-      </div>
-      <Bouton variante="danger" icone={Trash2} onClick={() => onSupprimer(index)} aria-label="Supprimer cette absence">
-        Retirer
-      </Bouton>
     </div>
   );
 }
 
-function EcranJournee({ referentiel, jour, setJour, reparation, lancerReparation, validationJour, options }) {
-  const jourSemaine = useMemo(() => {
-    try {
-      return jourDeLaDate(jour.date);
-    } catch {
-      return null;
-    }
-  }, [jour.date]);
+/** Une journée de la série, repliée sur une ligne. */
+function LigneJournee({ referentiel, journee, ouverte, onOuvrir }) {
+  const { reparation } = journee;
+  const etat = reparation.conflits.length > 0 ? 'conflit' : journee.nominale ? 'nominale' : 'reparee';
+  const couleur = etat === 'conflit' ? CAT_CORAL : etat === 'nominale' ? CAT_TEAL : CAT_AMBER;
 
-  const dansLaGrille = jourSemaine && referentiel.structure.grille.jours.includes(jourSemaine);
+  return (
+    <div className="rounded-xl border" style={{ borderColor: 'var(--border)' }}>
+      <button
+        type="button"
+        onClick={onOuvrir}
+        className="flex w-full flex-wrap items-center gap-3 px-3 py-2 text-left text-sm"
+        aria-expanded={ouverte}
+      >
+        <span className="w-28 shrink-0" style={{ fontFamily: F_MONO, color: 'var(--ink-soft)' }}>
+          {journee.date}
+        </span>
+        <span className="w-20 shrink-0" style={{ color: 'var(--ink)' }}>
+          {journee.jour}
+        </span>
+        <Badge couleur={couleur}>
+          {etat === 'conflit'
+            ? `${reparation.conflits.length} conflit(s)`
+            : etat === 'nominale'
+              ? 'inchangée'
+              : `${reparation.changements.length} changement(s)`}
+        </Badge>
+        {reparation.jeunesImpactes.length > 0 && (
+          <span className="text-xs" style={{ color: 'var(--ink-soft)' }}>
+            {reparation.jeunesImpactes.map((id) => referentiel.libelleJeune(id)).join(', ')}
+          </span>
+        )}
+      </button>
+      {ouverte && (
+        <div className="border-t px-3 py-3" style={{ borderColor: 'var(--border)' }}>
+          <ResultatReparation referentiel={referentiel} reparation={reparation} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EcranPeriode({
+  referentiel,
+  periode,
+  setPeriode,
+  resultat,
+  lancerAnalyse,
+  validationPeriode,
+  onEnregistrer,
+}) {
+  const [ouverte, setOuverte] = useState(null);
 
   const majAbsence = (index, valeur) =>
-    setJour({ ...jour, absences: jour.absences.map((a, i) => (i === index ? valeur : a)) });
+    setPeriode({ ...periode, absences: periode.absences.map((a, i) => (i === index ? valeur : a)) });
   const supprimerAbsence = (index) =>
-    setJour({ ...jour, absences: jour.absences.filter((_, i) => i !== index) });
+    setPeriode({ ...periode, absences: periode.absences.filter((_, i) => i !== index) });
   const ajouterAbsence = () =>
-    setJour({ ...jour, absences: [...jour.absences, { type: 'educateur', id: '', journee: true }] });
+    setPeriode({
+      ...periode,
+      absences: [...periode.absences, { type: 'educateur', id: '', du: periode.du, journee: true }],
+    });
 
   const renforts = referentiel.structure.educateurs.filter((e) => e.statut === 'renfort');
-  const creneauxDuJour = jourSemaine ? referentiel.creneauxTypeDuJour(jourSemaine) : [];
-
-  const absencesCompletes = jour.absences.every((a) => a.id);
+  const absencesCompletes = periode.absences.every((a) => a.id && a.du);
+  const erreurs = (validationPeriode?.problemes ?? []).filter((p) => p.gravite === 'erreur');
 
   return (
     <div className="space-y-4">
-      <Carte titre="La journée" sousTitre="Ces informations ne quittent pas le poste : jour.json ne circule pas.">
+      <Carte
+        titre="La situation"
+        sousTitre="Ce que vous saisissez ici ne quitte pas le poste."
+        actions={
+          resultat && (
+            <Bouton icone={Save} onClick={onEnregistrer}>
+              Enregistrer ce planning
+            </Bouton>
+          )
+        }
+      >
         <div className="flex flex-wrap items-end gap-3">
-          <div className="w-52">
-            <Champ libelle="Date" aide={jourSemaine ? classeDate(jour.date) : 'date invalide'}>
+          <div className="w-44">
+            <Champ libelle="À partir du" aide={classeDate(periode.du)}>
               <input
                 type="date"
                 className="w-full rounded-xl border px-3 py-2 text-sm"
                 style={styleSaisie}
-                value={jour.date}
-                onChange={(e) => setJour({ ...jour, date: e.target.value })}
+                value={periode.du}
+                onChange={(e) => setPeriode({ ...periode, du: e.target.value })}
               />
             </Champ>
           </div>
-          <div className="w-40">
-            <Champ libelle="Structure" aide={`chargée : v${referentiel.structure.meta.version}`}>
+          <div className="w-44">
+            <Champ
+              libelle="Jusqu’au"
+              aide={periode.au ? classeDate(periode.au) : 'vide = jusqu’au retour à la normale'}
+            >
               <input
-                type="number"
-                min="1"
+                type="date"
                 className="w-full rounded-xl border px-3 py-2 text-sm"
                 style={styleSaisie}
-                value={jour.structureVersion}
-                onChange={(e) => setJour({ ...jour, structureVersion: Number(e.target.value) })}
+                value={periode.au ?? ''}
+                onChange={(e) => {
+                  const suite = { ...periode };
+                  if (e.target.value) suite.au = e.target.value;
+                  else delete suite.au;
+                  setPeriode(suite);
+                }}
               />
             </Champ>
           </div>
           <Bouton
             variante="primaire"
             icone={RefreshCw}
-            onClick={lancerReparation}
-            disabled={!dansLaGrille || !absencesCompletes}
+            onClick={lancerAnalyse}
+            disabled={!absencesCompletes || erreurs.length > 0}
           >
-            Réparer la journée
+            Analyser la période
           </Bouton>
         </div>
 
-        {!dansLaGrille && (
+        {erreurs.length > 0 && (
           <div className="mt-3">
-            <Bandeau ton="alerte" icone={AlertTriangle} titre="Jour hors grille">
-              {jourSemaine
-                ? `Le ${jour.date} tombe un ${jourSemaine}, qui n’est pas un jour d’accueil de cette structure.`
-                : 'Date illisible.'}
-            </Bandeau>
+            <ListeProblemes problemes={erreurs} />
           </div>
         )}
-        {dansLaGrille && !absencesCompletes && (
+        {erreurs.length === 0 && !absencesCompletes && (
           <div className="mt-3">
-            <Bandeau ton="info" icone={Info} titre="Une absence n’a pas de personne">
-              Complétez ou retirez la ligne avant de lancer la réparation.
+            <Bandeau ton="info" icone={Info} titre="Une absence est incomplète">
+              Choisissez la personne et la date de début, ou retirez la ligne.
             </Bandeau>
           </div>
         )}
       </Carte>
 
-      <Carte
-        titre={`Absences (${jour.absences.length})`}
-        actions={<Bouton onClick={ajouterAbsence}>Ajouter</Bouton>}
-      >
-        {jour.absences.length === 0 ? (
-          <Vide>Personne d’absent : la journée est celle du planning type.</Vide>
+      <Carte titre={`Absences (${periode.absences.length})`} actions={<Bouton onClick={ajouterAbsence}>Ajouter</Bouton>}>
+        {periode.absences.length === 0 ? (
+          <Vide>Personne d’absent : l’analyse dira simplement si le planning type tient debout.</Vide>
         ) : (
           <div className="space-y-2">
-            {jour.absences.map((a, i) => (
+            {periode.absences.map((a, i) => (
               <LigneAbsence
                 key={i}
                 referentiel={referentiel}
@@ -1154,24 +1276,24 @@ function EcranJournee({ referentiel, jour, setJour, reparation, lancerReparation
       </Carte>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Carte titre="Renforts du jour" sousTitre="Un renfort n’est mobilisable que s’il est coché ici">
+        <Carte titre="Renforts mobilisables" sousTitre="Sur toute la période">
           {renforts.length === 0 ? (
             <Vide>Aucun éducateur de statut « renfort » dans la structure.</Vide>
           ) : (
             <div className="space-y-1.5">
               {renforts.map((e) => {
-                const actif = (jour.renfortsDuJour ?? []).includes(e.id);
+                const actif = (periode.renforts ?? []).includes(e.id);
                 return (
                   <label key={e.id} className="flex items-center gap-2 text-sm" style={{ color: 'var(--ink)' }}>
                     <input
                       type="checkbox"
                       checked={actif}
                       onChange={() =>
-                        setJour({
-                          ...jour,
-                          renfortsDuJour: actif
-                            ? (jour.renfortsDuJour ?? []).filter((id) => id !== e.id)
-                            : [...(jour.renfortsDuJour ?? []), e.id],
+                        setPeriode({
+                          ...periode,
+                          renforts: actif
+                            ? (periode.renforts ?? []).filter((id) => id !== e.id)
+                            : [...(periode.renforts ?? []), e.id],
                         })
                       }
                     />
@@ -1186,31 +1308,30 @@ function EcranJournee({ referentiel, jour, setJour, reparation, lancerReparation
           )}
         </Carte>
 
-        <Carte
-          titre="Créneaux épinglés"
-          sousTitre="Intouchables aujourd’hui seulement — le moteur contourne au lieu d’y puiser"
-        >
-          {creneauxDuJour.length === 0 ? (
-            <Vide>Aucun créneau ce jour-là dans le planning type.</Vide>
+        <Carte titre="Créneaux épinglés" sousTitre="Intouchables sur toute la période">
+          {referentiel.structure.planningType.length === 0 ? (
+            <Vide>Aucun créneau dans le planning type.</Vide>
           ) : (
             <div className="max-h-64 space-y-1 overflow-y-auto">
-              {creneauxDuJour.map((c) => {
-                const epingle = (jour.epingles ?? []).includes(c.id);
+              {referentiel.structure.planningType.map((c) => {
+                const epingle = (periode.epingles ?? []).includes(c.id);
                 return (
                   <label key={c.id} className="flex items-center gap-2 text-sm" style={{ color: 'var(--ink)' }}>
                     <input
                       type="checkbox"
                       checked={epingle}
                       onChange={() =>
-                        setJour({
-                          ...jour,
+                        setPeriode({
+                          ...periode,
                           epingles: epingle
-                            ? (jour.epingles ?? []).filter((id) => id !== c.id)
-                            : [...(jour.epingles ?? []), c.id],
+                            ? (periode.epingles ?? []).filter((id) => id !== c.id)
+                            : [...(periode.epingles ?? []), c.id],
                         })
                       }
                     />
-                    <span style={{ fontFamily: F_MONO, color: 'var(--ink-soft)' }}>{c.debut}</span>
+                    <span style={{ fontFamily: F_MONO, color: 'var(--ink-soft)' }}>
+                      {c.jour.slice(0, 3)} {c.debut}
+                    </span>
                     {referentiel.activite(c.activiteId)?.nom ?? c.activiteId}
                     {c.verrouille && <Pin size={12} aria-label="déjà verrouillé dans la structure" />}
                   </label>
@@ -1221,14 +1342,80 @@ function EcranJournee({ referentiel, jour, setJour, reparation, lancerReparation
         </Carte>
       </div>
 
-      {validationJour && validationJour.problemes.length > 0 && (
-        <Carte titre="Contrôle du fichier du jour">
-          <ListeProblemes problemes={validationJour.problemes} />
+      {validationPeriode && validationPeriode.problemes.length > erreurs.length && (
+        <Carte titre="Avertissements">
+          <ListeProblemes problemes={validationPeriode.problemes.filter((p) => p.gravite !== 'erreur')} />
         </Carte>
       )}
 
-      {reparation && <ResultatReparation referentiel={referentiel} reparation={reparation} options={options} />}
+      {resultat && (
+        <ResultatPeriode
+          referentiel={referentiel}
+          resultat={resultat}
+          ouverte={ouverte}
+          setOuverte={setOuverte}
+        />
+      )}
     </div>
+  );
+}
+
+function ResultatPeriode({ referentiel, resultat, ouverte, setOuverte }) {
+  const reparees = resultat.journees.filter((j) => !j.nominale).length;
+  const conflits = resultat.journees.reduce((t, j) => t + j.reparation.conflits.length, 0);
+
+  return (
+    <Carte
+      titre={`${resultat.journees.length} journée(s) analysée(s)`}
+      sousTitre={`coût total ${resultat.cout}`}
+      actions={
+        <Badge couleur={resultat.admissible ? CAT_TEAL : CAT_CORAL}>
+          {resultat.admissible ? 'admissible' : 'non admissible'}
+        </Badge>
+      }
+    >
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Statistique valeur={reparees} libelle="journées à réorganiser" />
+        <Statistique valeur={conflits} libelle="conflits" alerte={conflits > 0} />
+        <Statistique
+          valeur={resultat.retourNominal ?? '—'}
+          libelle="retour au fonctionnement initial"
+          detail={
+            resultat.retourNominal
+              ? 'à partir de cette date, plus rien ne change'
+              : 'la période s’achève sans y revenir'
+          }
+          alerte={!resultat.retourNominal}
+        />
+      </div>
+
+      {resultat.violationsHebdomadaires.length > 0 && (
+        <div className="mt-4">
+          <Bandeau ton="alerte" icone={AlertTriangle} titre="Quotas hebdomadaires dépassés">
+            <p className="mb-1">
+              Invisibles journée par journée : c’est la lecture à la semaine qui les fait apparaître.
+            </p>
+            {resultat.violationsHebdomadaires.map((v, i) => (
+              <p key={i}>
+                {v.regleId} — {v.message}
+              </p>
+            ))}
+          </Bandeau>
+        </div>
+      )}
+
+      <div className="mt-4 space-y-1.5">
+        {resultat.journees.map((journee) => (
+          <LigneJournee
+            key={journee.date}
+            referentiel={referentiel}
+            journee={journee}
+            ouverte={ouverte === journee.date}
+            onOuvrir={() => setOuverte(ouverte === journee.date ? null : journee.date)}
+          />
+        ))}
+      </div>
+    </Carte>
   );
 }
 
@@ -1724,14 +1911,13 @@ function EcranFichiers({
   structure,
   referentiel,
   validation,
-  jour,
-  validationJour,
+  periode,
   chargerStructure,
-  chargerJour,
+  chargerPeriode,
   erreurStockage,
 }) {
   const [messageStructure, setMessageStructure] = useState(null);
-  const [messageJour, setMessageJour] = useState(null);
+  const [messagePeriode, setMessagePeriode] = useState(null);
 
   const deposerStructure = (texte, nom) => {
     let donnees;
@@ -1771,25 +1957,25 @@ function EcranFichiers({
     });
   };
 
-  const deposerJour = (texte, nom) => {
+  const deposerPeriode = (texte, nom) => {
     let donnees;
     try {
       donnees = JSON.parse(texte);
     } catch (e) {
-      setMessageJour({ ton: 'alerte', texte: `${nom} n’est pas du JSON valide : ${e.message}` });
+      setMessagePeriode({ ton: 'alerte', texte: `${nom} n’est pas du JSON valide : ${e.message}` });
       return;
     }
-    const resultat = valideJour(referentiel, donnees);
+    const resultat = validePeriode(referentiel, donnees);
     if (!resultat.valide) {
-      setMessageJour({
+      setMessagePeriode({
         ton: 'alerte',
         texte: `${nom} n’est pas exploitable avec la structure chargée.`,
         problemes: resultat.problemes,
       });
       return;
     }
-    chargerJour(donnees);
-    setMessageJour({ ton: 'succes', texte: `${nom} chargé.`, problemes: resultat.problemes });
+    chargerPeriode(donnees);
+    setMessagePeriode({ ton: 'succes', texte: `${nom} chargé.`, problemes: resultat.problemes });
   };
 
   const exporterStructure = () => {
@@ -1876,31 +2062,31 @@ function EcranFichiers({
 
       {structure && (
         <Carte
-          titre="jour.json"
-          sousTitre="Absences et retouches du jour — ne circule pas"
+          titre="periode.json"
+          sousTitre="La situation en cours — absences, renforts, épingles. Ne circule pas."
           actions={
             <Bouton
               icone={Download}
-              onClick={() => telecharger(`jour-${jour.date}.json`, `${JSON.stringify(jour, null, 2)}\n`)}
+              onClick={() => telecharger(`periode-${periode.du}.json`, `${JSON.stringify(periode, null, 2)}\n`)}
             >
               Exporter
             </Bouton>
           }
         >
           <ZoneDepot
-            libelle="Déposer un jour.json"
+            libelle="Déposer un periode.json"
             aide="Refusé s’il a été construit sur une autre version de la structure."
-            onFichier={deposerJour}
+            onFichier={deposerPeriode}
           />
-          {messageJour && (
+          {messagePeriode && (
             <div className="mt-3 space-y-3">
               <Bandeau
-                ton={messageJour.ton}
-                icone={messageJour.ton === 'alerte' ? AlertTriangle : Check}
+                ton={messagePeriode.ton}
+                icone={messagePeriode.ton === 'alerte' ? AlertTriangle : Check}
               >
-                {messageJour.texte}
+                {messagePeriode.texte}
               </Bandeau>
-              {messageJour.problemes?.length > 0 && <ListeProblemes problemes={messageJour.problemes} />}
+              {messagePeriode.problemes?.length > 0 && <ListeProblemes problemes={messagePeriode.problemes} />}
             </div>
           )}
         </Carte>
@@ -2122,8 +2308,8 @@ function EcranReglages({ options, setOptions, theme, setTheme, accent, setAccent
 
       <Carte titre="Stockage" sousTitre="Ce que ce poste garde entre deux ouvertures">
         <p className="text-sm" style={{ color: 'var(--ink)' }}>
-          La structure chargée, la journée en cours et ces réglages, dans le stockage local du navigateur, sous le
-          préfixe <code style={{ fontFamily: F_MONO }}>planning-ime:</code>.
+          La structure chargée, la situation en cours, les plannings enregistrés et ces réglages, dans le
+          stockage local du navigateur, sous le préfixe <code style={{ fontFamily: F_MONO }}>planning-ime:</code>.
         </p>
         <p className="mt-2 text-sm" style={{ color: 'var(--ink-soft)' }}>
           Ce préfixe n’est pas cosmétique : cette application, DatABA et DatABA Manager partagent la même adresse,
@@ -2134,8 +2320,15 @@ function EcranReglages({ options, setOptions, theme, setTheme, accent, setAccent
             variante="danger"
             icone={Trash2}
             onClick={() => {
-              if (!window.confirm('Effacer la structure, la journée et les réglages de ce poste ?')) return;
-              [CLE_STRUCTURE, CLE_JOUR, CLE_OPTIONS].forEach(effacerStockage);
+              if (
+                !window.confirm(
+                  'Effacer la structure, la situation en cours, les plannings enregistrés et les réglages ' +
+                    'de ce poste ?',
+                )
+              ) {
+                return;
+              }
+              [CLE_STRUCTURE, CLE_PERIODE, CLE_SCENARIOS, CLE_OPTIONS].forEach(effacerStockage);
               window.location.reload();
             }}
           >
@@ -2148,21 +2341,192 @@ function EcranReglages({ options, setOptions, theme, setTheme, accent, setAccent
 }
 
 /* ==================== Application ==================== */
+/* ==================== Écran Plannings ====================
+   Les situations enregistrées, sous le nom qu'on leur a donné : « absence
+   Lucas semaine ». Chacune garde DEUX choses — la situation (ce qui a été
+   saisi) et le gel (ce qui a été produit et affiché). Le gel ne bouge plus :
+   c'est ce qui a été imprimé et annoncé à l'équipe. Un bouton recalcule à
+   côté, et la comparaison dit ce qui aurait changé. */
 
-function jourVide(version) {
+function ResumeSituation({ referentiel, periode }) {
+  if (periode.absences.length === 0) return <span>aucune absence</span>;
+  return (
+    <span>
+      {periode.absences
+        .map((a) => {
+          const nom = a.type === 'jeune' ? referentiel.libelleJeune(a.id) : referentiel.libelleEducateur(a.id);
+          return `${nom} ${a.du}${a.au ? ` → ${a.au}` : ' → sans terme'}`;
+        })
+        .join(' · ')}
+    </span>
+  );
+}
+
+function Comparaison({ referentiel, differences }) {
+  if (differences.length === 0) {
+    return (
+      <Bandeau ton="succes" icone={Check} titre="Rien n’a changé">
+        Le recalcul redonne exactement le planning enregistré.
+      </Bandeau>
+    );
+  }
+  return (
+    <div className="space-y-1.5">
+      <Bandeau ton="alerte" icone={AlertTriangle} titre={`${differences.length} journée(s) différeraient aujourd’hui`}>
+        Le planning enregistré reste tel qu’il a été produit. Voici ce qu’un nouveau calcul donnerait.
+      </Bandeau>
+      {differences.map((d) => (
+        <div key={d.date} className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--border)' }}>
+          <span style={{ fontFamily: F_MONO, color: 'var(--ink-soft)' }}>{d.date}</span>{' '}
+          {!d.dansAvant && <Badge couleur={CAT_TEAL}>journée nouvelle</Badge>}
+          {!d.dansApres && <Badge couleur={CAT_ARDOISE}>journée disparue</Badge>}
+          {d.dansAvant && d.dansApres && (
+            <span style={{ color: 'var(--ink)' }}>
+              {d.creneauxModifies.length > 0 && `${d.creneauxModifies.length} créneau(x) modifié(s)`}
+              {d.creneauxAjoutes.length > 0 && ` · ${d.creneauxAjoutes.length} ajouté(s)`}
+              {d.creneauxRetires.length > 0 && ` · ${d.creneauxRetires.length} retiré(s)`}
+              {d.jeunesImpactes.length > 0 && (
+                <span style={{ color: 'var(--ink-soft)' }}>
+                  {' '}
+                  — {d.jeunesImpactes.map((id) => referentiel.libelleJeune(id)).join(', ')}
+                </span>
+              )}
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CartePlanning({ referentiel, structure, scenario, onOuvrir, onRenommer, onSupprimer, options }) {
+  const [comparaison, setComparaison] = useState(null);
+  const perime = scenario.structureVersion !== structure.meta.version;
+
+  const recalculer = () => {
+    try {
+      const neuf = reparePeriode(referentiel, scenario.periode, options);
+      setComparaison(comparePeriodes(scenario.gel, neuf));
+    } catch (e) {
+      window.alert(`Le recalcul n’a pas abouti : ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  const journees = scenario.gel?.journees ?? [];
+  const reparees = journees.filter((j) => !j.nominale).length;
+
+  return (
+    <div className="rounded-xl border p-4" style={{ borderColor: 'var(--border)' }}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-base" style={{ fontFamily: F_DISPLAY, fontWeight: 600, color: 'var(--ink)' }}>
+            {scenario.nom}
+          </h3>
+          <p className="mt-0.5 text-sm" style={{ color: 'var(--ink-soft)' }}>
+            <ResumeSituation referentiel={referentiel} periode={scenario.periode} />
+          </p>
+          <p className="mt-1 text-xs" style={{ color: 'var(--ink-soft)', fontFamily: F_MONO }}>
+            enregistré le {scenario.cree} · structure v{scenario.structureVersion} · {journees.length} journée(s),{' '}
+            {reparees} réorganisée(s)
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <Bouton onClick={onOuvrir}>Ouvrir</Bouton>
+          <Bouton icone={GitCompare} onClick={recalculer}>
+            Recalculer
+          </Bouton>
+          <Bouton onClick={onRenommer}>Renommer</Bouton>
+          <Bouton variante="danger" icone={Trash2} onClick={onSupprimer}>
+            Supprimer
+          </Bouton>
+        </div>
+      </div>
+
+      {perime && (
+        <div className="mt-3">
+          <Bandeau ton="alerte" icone={AlertTriangle} titre="Calculé sur une autre structure">
+            Ce planning a été produit sur la structure v{scenario.structureVersion}, or la structure chargée est en
+            v{structure.meta.version}. La comparaison n’est pas fiable : les identifiants ont pu changer de sens.
+          </Bandeau>
+        </div>
+      )}
+
+      {comparaison && (
+        <div className="mt-3">
+          <Comparaison referentiel={referentiel} differences={comparaison} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EcranPlannings({ referentiel, structure, scenarios, setScenarios, onOuvrir, options }) {
+  const renommer = (id) => {
+    const scenario = scenarios.find((s) => s.id === id);
+    const nom = window.prompt('Nouveau nom', scenario?.nom ?? '');
+    if (nom === null || !nom.trim()) return;
+    setScenarios(scenarios.map((s) => (s.id === id ? { ...s, nom: nom.trim() } : s)));
+  };
+
+  const supprimer = (id) => {
+    const scenario = scenarios.find((s) => s.id === id);
+    if (!window.confirm(`Supprimer « ${scenario?.nom} » ?`)) return;
+    setScenarios(scenarios.filter((s) => s.id !== id));
+  };
+
+  return (
+    <div className="space-y-4">
+      <Carte titre={`${scenarios.length} planning(s) enregistré(s)`}>
+        <Bandeau ton="info" icone={Info} titre="Ce qui est gardé, et ce qui ne bouge plus">
+          Chaque planning conserve la situation saisie <em>et</em> le résultat tel qu’il a été produit. Le résultat
+          est figé : c’est ce qui a été imprimé et annoncé à l’équipe. « Recalculer » relance le moteur à côté et
+          montre ce qui aurait changé, sans rien écraser.
+        </Bandeau>
+      </Carte>
+
+      {scenarios.length === 0 ? (
+        <Carte>
+          <Vide>
+            Aucun planning enregistré. Analysez une période, puis enregistrez-la sous un nom — « absence Lucas
+            semaine », par exemple.
+          </Vide>
+        </Carte>
+      ) : (
+        <div className="space-y-3">
+          {scenarios.map((scenario) => (
+            <CartePlanning
+              key={scenario.id}
+              referentiel={referentiel}
+              structure={structure}
+              scenario={scenario}
+              options={options}
+              onOuvrir={() => onOuvrir(scenario)}
+              onRenommer={() => renommer(scenario.id)}
+              onSupprimer={() => supprimer(scenario.id)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ==================== Application ==================== */
+
+function periodeVide(version) {
   return {
     structureVersion: version ?? 1,
-    date: aujourdhui(),
+    du: aujourdhui(),
     absences: [],
-    renfortsDuJour: [],
+    renforts: [],
     epingles: [],
-    affectationsManuelles: [],
   };
 }
 
 export default function App() {
   const [structure, setStructureEtat] = useState(() => lireStockage(CLE_STRUCTURE));
-  const [jour, setJourEtat] = useState(() => lireStockage(CLE_JOUR) ?? jourVide());
+  const [periode, setPeriodeEtat] = useState(() => lireStockage(CLE_PERIODE) ?? periodeVide());
+  const [scenarios, setScenariosEtat] = useState(() => lireStockage(CLE_SCENARIOS) ?? []);
   const [options, setOptionsEtat] = useState(() => optionsAvec(lireStockage(CLE_OPTIONS) ?? {}));
   const [erreurStockage, setErreurStockage] = useState(false);
 
@@ -2171,8 +2535,9 @@ export default function App() {
   const [theme, setTheme] = useState(() => document.documentElement.getAttribute('data-theme') ?? 'light');
   const [accent, setAccent] = useState(() => document.documentElement.getAttribute('data-accent'));
 
-  const [reparation, setReparation] = useState(null);
+  const [resultat, setResultat] = useState(null);
   const [jourAffiche, setJourAffiche] = useState(null);
+  const [dateAffichee, setDateAffichee] = useState(null);
   const [axe, setAxe] = useState('salle');
   const [sourcePlanning, setSourcePlanning] = useState('type');
 
@@ -2192,10 +2557,18 @@ export default function App() {
     [persister],
   );
 
-  const setJour = useCallback(
+  const setPeriode = useCallback(
     (valeur) => {
-      setJourEtat(valeur);
-      persister(CLE_JOUR, valeur);
+      setPeriodeEtat(valeur);
+      persister(CLE_PERIODE, valeur);
+    },
+    [persister],
+  );
+
+  const setScenarios = useCallback(
+    (valeur) => {
+      setScenariosEtat(valeur);
+      persister(CLE_SCENARIOS, valeur);
     },
     [persister],
   );
@@ -2240,9 +2613,9 @@ export default function App() {
   }, [structure]);
 
   const validation = useMemo(() => (structure ? valideStructure(structure) : null), [structure]);
-  const validationJour = useMemo(
-    () => (referentiel ? valideJour(referentiel, jour) : null),
-    [referentiel, jour],
+  const validationPeriode = useMemo(
+    () => (referentiel ? validePeriode(referentiel, periode) : null),
+    [referentiel, periode],
   );
 
   /* Le jour affiché doit toujours être un jour d'accueil de la structure
@@ -2254,39 +2627,69 @@ export default function App() {
     setJourAffiche((actuel) => (actuel && jours.includes(actuel) ? actuel : (jours[0] ?? null)));
   }, [referentiel]);
 
-  /* Une réparation porte sur une structure et une journée données : dès que
-     l'une des deux bouge, le résultat affiché ne décrit plus rien. Mieux vaut
-     le retirer que laisser lire un planning périmé. */
+  /* Une analyse porte sur une structure, une situation et un barème donnés :
+     dès que l'un des trois bouge, le résultat affiché ne décrit plus rien.
+     Mieux vaut le retirer que laisser lire un planning périmé. */
   useEffect(() => {
-    setReparation(null);
+    setResultat(null);
+    setDateAffichee(null);
     setSourcePlanning('type');
-  }, [structure, jour, options]);
+  }, [structure, periode, options]);
 
   const chargerStructure = useCallback(
     (donnees) => {
       setStructure(donnees);
-      setJour({ ...jourVide(donnees.meta.version), date: jour.date });
+      setPeriode({ ...periodeVide(donnees.meta.version), du: periode.du });
       setDestination('planning');
     },
-    [setStructure, setJour, jour.date],
+    [setStructure, setPeriode, periode.du],
   );
 
-  const lancerReparation = useCallback(() => {
+  const lancerAnalyse = useCallback(() => {
     if (!referentiel) return;
     try {
-      const resultat = repare(referentiel, jour, options);
-      setReparation(resultat);
-      setJourAffiche(resultat.planning.jour);
-      setSourcePlanning('reparation');
+      const calcul = reparePeriode(referentiel, periode, options);
+      setResultat(calcul);
+      setDateAffichee(calcul.journees[0]?.date ?? null);
+      setSourcePlanning(calcul.journees.length > 0 ? 'reparation' : 'type');
     } catch (e) {
-      window.alert(`La réparation n’a pas abouti : ${e instanceof Error ? e.message : String(e)}`);
+      window.alert(`L’analyse n’a pas abouti : ${e instanceof Error ? e.message : String(e)}`);
     }
-  }, [referentiel, jour, options]);
+  }, [referentiel, periode, options]);
 
-  /* setReparation est appelé juste après l'effet qui le remet à null sur
-     changement de `jour` : React traite les deux dans le même passage et
-     l'effet, déclenché par la dépendance inchangée, ne s'exécute pas à
-     nouveau. Le résultat survit donc jusqu'à la prochaine modification réelle. */
+  const enregistrer = useCallback(() => {
+    if (!resultat || !structure) return;
+    const propose = periode.absences[0]
+      ? `absence ${periode.absences[0].id} — ${periode.du}`
+      : `planning ${periode.du}`;
+    const nom = window.prompt('Nom de ce planning', propose);
+    if (nom === null || !nom.trim()) return;
+    setScenarios([
+      {
+        id: `s${Date.now().toString(36)}`,
+        nom: nom.trim(),
+        cree: aujourdhui(),
+        structureVersion: structure.meta.version,
+        periode,
+        gel: resultat,
+      },
+      ...scenarios,
+    ]);
+    setDestination('plannings');
+  }, [resultat, structure, periode, scenarios, setScenarios]);
+
+  const ouvrirScenario = useCallback(
+    (scenario) => {
+      setPeriode(scenario.periode);
+      // Le gel s'affiche tel quel : rouvrir un planning enregistré ne relance
+      // pas le moteur, sinon ce ne serait plus le planning enregistré.
+      setResultat(scenario.gel);
+      setDateAffichee(scenario.gel?.journees[0]?.date ?? null);
+      setSourcePlanning('reparation');
+      setDestination('periode');
+    },
+    [setPeriode],
+  );
 
   const enTete = (
     <header
@@ -2319,6 +2722,18 @@ export default function App() {
     </header>
   );
 
+  const ecranFichiers = (
+    <EcranFichiers
+      structure={structure}
+      referentiel={referentiel}
+      validation={validation}
+      periode={periode}
+      chargerStructure={chargerStructure}
+      chargerPeriode={setPeriode}
+      erreurStockage={erreurStockage}
+    />
+  );
+
   let contenu;
   if (erreurReferentiel) {
     contenu = (
@@ -2328,18 +2743,7 @@ export default function App() {
       </Bandeau>
     );
   } else if (!structure || !referentiel) {
-    contenu = (
-      <EcranFichiers
-        structure={null}
-        referentiel={null}
-        validation={null}
-        jour={jour}
-        validationJour={null}
-        chargerStructure={chargerStructure}
-        chargerJour={setJour}
-        erreurStockage={erreurStockage}
-      />
-    );
+    contenu = ecranFichiers;
   } else if (destination === 'planning') {
     contenu = jourAffiche ? (
       <EcranPlanning
@@ -2350,21 +2754,34 @@ export default function App() {
         setAxe={setAxe}
         source={sourcePlanning}
         setSource={setSourcePlanning}
-        reparation={reparation}
+        resultat={resultat}
+        dateAffichee={dateAffichee}
+        setDateAffichee={setDateAffichee}
         options={options}
       />
     ) : (
       <Vide>La grille de cette structure ne déclare aucun jour d’accueil.</Vide>
     );
-  } else if (destination === 'journee') {
+  } else if (destination === 'periode') {
     contenu = (
-      <EcranJournee
+      <EcranPeriode
         referentiel={referentiel}
-        jour={jour}
-        setJour={setJour}
-        reparation={reparation}
-        lancerReparation={lancerReparation}
-        validationJour={validationJour}
+        periode={periode}
+        setPeriode={setPeriode}
+        resultat={resultat}
+        lancerAnalyse={lancerAnalyse}
+        validationPeriode={validationPeriode}
+        onEnregistrer={enregistrer}
+      />
+    );
+  } else if (destination === 'plannings') {
+    contenu = (
+      <EcranPlannings
+        referentiel={referentiel}
+        structure={structure}
+        scenarios={scenarios}
+        setScenarios={setScenarios}
+        onOuvrir={ouvrirScenario}
         options={options}
       />
     );
@@ -2380,18 +2797,7 @@ export default function App() {
   } else if (destination === 'structure') {
     contenu = <EcranStructure referentiel={referentiel} structure={structure} />;
   } else if (destination === 'fichiers') {
-    contenu = (
-      <EcranFichiers
-        structure={structure}
-        referentiel={referentiel}
-        validation={validation}
-        jour={jour}
-        validationJour={validationJour}
-        chargerStructure={chargerStructure}
-        chargerJour={setJour}
-        erreurStockage={erreurStockage}
-      />
-    );
+    contenu = ecranFichiers;
   } else {
     contenu = (
       <EcranReglages

@@ -81,12 +81,19 @@ tests et n'est jamais importé depuis `interface/`.
 ## Avant toute livraison
 
 ```bash
-npx tsc -p tsconfig.check.json   # typecheck strict (noUnused* compris)
-npm test                         # la suite doit rester verte
-npx vite build                   # l'interface doit compiler
+./verifier.sh
 ```
 
-Ne rien livrer sur un contrôle rouge.
+Cinq contrôles, dans l'ordre où ils attrapent le plus de choses. Ne rien livrer
+sur un contrôle rouge — la CI (`.github/workflows/deploy.yml`) fait passer le
+vérificateur avant le build, et la publication en dépend.
+
+**`vite build` ne suffit pas.** Il résout les imports mais ne dit rien d'un
+identifiant devenu libre après un renommage : il le laisse passer, et l'erreur
+n'explose qu'au clic de l'utilisateur sur l'écran concerné. C'est le contrôle 2
+(`tsc` en mode JS permissif, filtré sur « Cannot find name ») qui attrape ça —
+il a déjà rattrapé un `CLE_JOUR` survivant à la refonte de l'écran Journée,
+alors que le build était vert.
 
 ## Avis npm audit
 

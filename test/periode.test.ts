@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   Referentiel,
   auditeSemaine,
+  comparePeriodes,
   datesDeLaPeriode,
   finDeLaPeriode,
   jourDeLaPeriode,
@@ -280,5 +281,47 @@ describe('validation d une période', () => {
     const resultat = validePeriode(ref, p);
     assert.equal(resultat.valide, true);
     assert.ok(resultat.problemes.some((x) => x.code === 'absence.hors-periode'));
+  });
+});
+
+describe('comparaison de deux séries', () => {
+  const ref = referentielExemple();
+  const situation = periode([{ type: 'educateur', id: 'e3', du: '2026-09-14', au: '2026-09-15' }]);
+
+  it('ne rend rien quand le recalcul redonne le gel', () => {
+    const gel = reparePeriode(ref, situation);
+    const neuf = reparePeriode(ref, situation);
+    assert.deepEqual(comparePeriodes(gel, neuf), []);
+  });
+
+  it('repère les créneaux dont la composition a changé', () => {
+    const gel = reparePeriode(ref, situation);
+    // Le renfort n'est plus mobilisable : le moteur doit se débrouiller
+    // autrement, et le planning n'est plus le même.
+    const neuf = reparePeriode(ref, { ...situation, renforts: [] });
+
+    const differences = comparePeriodes(gel, neuf);
+    assert.ok(differences.length > 0);
+    const lundi = differences.find((d) => d.date === '2026-09-14')!;
+    assert.ok(lundi.creneauxModifies.length > 0);
+    assert.ok(lundi.dansAvant && lundi.dansApres);
+  });
+
+  it('signale une journée présente d un seul côté', () => {
+    const court = reparePeriode(ref, { ...situation, au: '2026-09-14' });
+    const long = reparePeriode(ref, { ...situation, au: '2026-09-15' });
+
+    const differences = comparePeriodes(court, long);
+    const ajoutee = differences.find((d) => d.date === '2026-09-15')!;
+    assert.equal(ajoutee.dansAvant, false);
+    assert.equal(ajoutee.dansApres, true);
+    assert.ok(ajoutee.creneauxAjoutes.length > 0);
+  });
+
+  it('nomme les jeunes dont la journée a changé', () => {
+    const gel = reparePeriode(ref, situation);
+    const neuf = reparePeriode(ref, { ...situation, renforts: [] });
+    const lundi = comparePeriodes(gel, neuf).find((d) => d.date === '2026-09-14')!;
+    assert.ok(lundi.jeunesImpactes.length > 0, 'un changement d’éducateur touche des jeunes');
   });
 });

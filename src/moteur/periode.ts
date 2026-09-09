@@ -25,7 +25,7 @@ import type {
 } from '../types.ts';
 import { jourDeLaDate } from './etatJour.ts';
 import { optionsAvec, type OptionsPartielles } from './options.ts';
-import { repare, type Reparation } from './reparation.ts';
+import { jeunesImpactes, repare, type Reparation } from './reparation.ts';
 import { bilanDeSemaine } from './semaine.ts';
 
 /** Garde-fou : une periode de plus d'un an trahit une erreur de saisie. */
@@ -184,4 +184,108 @@ export function reparePeriode(
     admissible:
       journees.every((j) => j.reparation.admissible) && !violationsHebdomadaires.some((v) => v.dure),
   };
+}
+
+/* ==================== Comparaison de deux series ====================
+   Un planning enregistre est fige : c'est ce qui a ete imprime et annonce a
+   l'equipe, il ne doit plus bouger. Mais la structure, elle, evolue. Comparer
+   le gel au resultat d'un nouveau calcul dit exactement ce qui aurait change —
+   sans rien ecraser. */
+
+export interface DifferenceJournee {
+  date: DateIso;
+  /** La journee existait-elle de chaque cote ? Une periode peut avoir bouge. */
+  dansAvant: boolean;
+  dansApres: boolean;
+  jeunesImpactes: string[];
+  /** Creneaux dont la composition a change, par id. */
+  creneauxModifies: string[];
+  /** Creneaux presents d'un seul cote. */
+  creneauxAjoutes: string[];
+  creneauxRetires: string[];
+}
+
+function empreinteCreneau(creneau: {
+  jeunes: readonly string[];
+  educateurs: readonly string[];
+  salleId: string | null;
+  activiteId: string;
+  affectations: readonly { jeuneId: string; educateurId: string }[];
+}): string {
+  const paires = creneau.affectations.map((a) => `${a.jeuneId}>${a.educateurId}`).sort();
+  return [
+    creneau.activiteId,
+    creneau.salleId ?? '-',
+    [...creneau.jeunes].sort().join('+'),
+    [...creneau.educateurs].sort().join('+'),
+    paires.join('+'),
+  ].join('|');
+}
+
+/**
+ * Ce qui differe entre deux series. Ne rend que les journees qui ont bouge :
+ * une liste vide veut dire que le recalcul redonne exactement le gel.
+ */
+export function comparePeriodes(
+  avant: ReparationPeriode,
+  apres: ReparationPeriode,
+): DifferenceJournee[] {
+  const parDate = new Map<DateIso, { avant?: JourneeReparee; apres?: JourneeReparee }>();
+  for (const j of avant.journees) parDate.set(j.date, { ...parDate.get(j.date), avant: j });
+  for (const j of apres.journees) parDate.set(j.date, { ...parDate.get(j.date), apres: j });
+
+  const differences: DifferenceJournee[] = [];
+
+  for (const date of [...parDate.keys()].sort(comparerDates)) {
+    const { avant: a, apres: b } = parDate.get(date)!;
+
+    if (!a || !b) {
+      differences.push({
+        date,
+        dansAvant: !!a,
+        dansApres: !!b,
+        jeunesImpactes: [],
+        creneauxModifies: [],
+        creneauxAjoutes: b ? b.reparation.planning.creneaux.map((c) => c.id) : [],
+        creneauxRetires: a ? a.reparation.planning.creneaux.map((c) => c.id) : [],
+      });
+      continue;
+    }
+
+    const empreintesAvant = new Map(
+      a.reparation.planning.creneaux.map((c) => [c.id, empreinteCreneau(c)]),
+    );
+    const empreintesApres = new Map(
+      b.reparation.planning.creneaux.map((c) => [c.id, empreinteCreneau(c)]),
+    );
+
+    const modifies: string[] = [];
+    const ajoutes: string[] = [];
+    const retires: string[] = [];
+
+    for (const [id, empreinte] of empreintesApres) {
+      const ancienne = empreintesAvant.get(id);
+      if (ancienne === undefined) ajoutes.push(id);
+      else if (ancienne !== empreinte) modifies.push(id);
+    }
+    for (const id of empreintesAvant.keys()) {
+      if (!empreintesApres.has(id)) retires.push(id);
+    }
+
+    const impactes = jeunesImpactes(a.reparation.planning, b.reparation.planning);
+
+    if (modifies.length + ajoutes.length + retires.length + impactes.length > 0) {
+      differences.push({
+        date,
+        dansAvant: true,
+        dansApres: true,
+        jeunesImpactes: impactes,
+        creneauxModifies: modifies.sort(),
+        creneauxAjoutes: ajoutes.sort(),
+        creneauxRetires: retires.sort(),
+      });
+    }
+  }
+
+  return differences;
 }
