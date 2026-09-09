@@ -1,0 +1,960 @@
+{
+  "meta": {
+    "version": 7,
+    "dateModification": "2026-09-09",
+    "auteur": "CM",
+    "etablissement": "IME",
+    "libelle": "Exemple de reference — annee 2026-2027, periode 1"
+  },
+  "grille": {
+    "pasMinutes": 30,
+    "jours": [
+      "lundi",
+      "mardi",
+      "mercredi",
+      "jeudi",
+      "vendredi"
+    ],
+    "debut": "09:00",
+    "fin": "16:30",
+    "pauses": [
+      {
+        "debut": "12:00",
+        "pas": 2,
+        "libelle": "Repas"
+      }
+    ]
+  },
+  "salles": [
+    {
+      "id": "s1",
+      "nom": "Salle 1",
+      "capacite": 8,
+      "tags": [
+        "classe"
+      ]
+    },
+    {
+      "id": "s2",
+      "nom": "Salle snoezelen",
+      "capacite": 2,
+      "tags": [
+        "sensoriel",
+        "calme"
+      ]
+    },
+    {
+      "id": "cuisine",
+      "nom": "Cuisine pedagogique",
+      "capacite": 4,
+      "tags": [
+        "atelier"
+      ]
+    },
+    {
+      "id": "gym",
+      "nom": "Gymnase",
+      "capacite": 15,
+      "tags": [
+        "sport"
+      ]
+    },
+    {
+      "id": "ext",
+      "nom": "Exterieur",
+      "capacite": 99,
+      "tags": [
+        "hors-les-murs"
+      ]
+    }
+  ],
+  "groupes": [
+    {
+      "id": "g1",
+      "nom": "Groupe A",
+      "refEducateurs": [
+        "e1",
+        "e2",
+        "e3"
+      ]
+    },
+    {
+      "id": "g2",
+      "nom": "Groupe B",
+      "refEducateurs": [
+        "e5"
+      ]
+    }
+  ],
+  "jeunes": [
+    {
+      "id": "j1",
+      "initiales": "L.M.",
+      "groupeId": "g1",
+      "encadrement": 1,
+      "presence": {
+        "lundi": {
+          "debut": "09:00",
+          "fin": "16:00"
+        }
+      },
+      "actif": true
+    },
+    {
+      "id": "j2",
+      "initiales": "A.B.",
+      "groupeId": "g1",
+      "encadrement": 0.5,
+      "presence": {
+        "lundi": {
+          "debut": "09:00",
+          "fin": "16:00"
+        },
+        "mardi": {
+          "debut": "09:00",
+          "fin": "11:30"
+        }
+      },
+      "actif": true
+    },
+    {
+      "id": "j3",
+      "initiales": "T.R.",
+      "groupeId": "g1",
+      "encadrement": 0.33,
+      "presence": {
+        "lundi": {
+          "debut": "09:00",
+          "fin": "16:00"
+        },
+        "mardi": {
+          "debut": "09:00",
+          "fin": "11:30"
+        }
+      },
+      "actif": true
+    },
+    {
+      "id": "j4",
+      "initiales": "S.D.",
+      "groupeId": "g1",
+      "encadrement": 0.33,
+      "presence": {
+        "lundi": {
+          "debut": "09:00",
+          "fin": "16:00"
+        },
+        "mardi": {
+          "debut": "09:00",
+          "fin": "11:30"
+        }
+      },
+      "actif": true
+    },
+    {
+      "id": "j5",
+      "initiales": "N.K.",
+      "groupeId": "g2",
+      "encadrement": 1,
+      "presence": {
+        "lundi": {
+          "debut": "09:00",
+          "fin": "16:00"
+        }
+      },
+      "actif": true
+    },
+    {
+      "id": "j6",
+      "initiales": "P.L.",
+      "groupeId": "g2",
+      "encadrement": 0.33,
+      "presence": {
+        "lundi": {
+          "debut": "09:00",
+          "fin": "16:00"
+        },
+        "mardi": {
+          "debut": "09:00",
+          "fin": "11:30"
+        }
+      },
+      "actif": true
+    }
+  ],
+  "educateurs": [
+    {
+      "id": "e1",
+      "nom": "Dupont",
+      "prenom": "Marie",
+      "statut": "titulaire",
+      "fonctions": [
+        "educateur"
+      ],
+      "disponibilites": {
+        "lundi": {
+          "debut": "09:00",
+          "fin": "17:00"
+        },
+        "mardi": {
+          "debut": "09:00",
+          "fin": "17:00"
+        }
+      },
+      "detachable": true,
+      "actif": true
+    },
+    {
+      "id": "e2",
+      "nom": "Benali",
+      "prenom": "Karim",
+      "statut": "titulaire",
+      "fonctions": [
+        "educateur",
+        "referent-transversal"
+      ],
+      "disponibilites": {
+        "lundi": {
+          "debut": "09:00",
+          "fin": "17:00"
+        },
+        "mardi": {
+          "debut": "09:00",
+          "fin": "17:00"
+        }
+      },
+      "detachable": true,
+      "actif": true
+    },
+    {
+      "id": "e3",
+      "nom": "Morel",
+      "prenom": "Sophie",
+      "statut": "titulaire",
+      "fonctions": [
+        "educateur"
+      ],
+      "disponibilites": {
+        "lundi": {
+          "debut": "09:00",
+          "fin": "17:00"
+        },
+        "mardi": {
+          "debut": "09:00",
+          "fin": "17:00"
+        }
+      },
+      "detachable": true,
+      "actif": true
+    },
+    {
+      "id": "e4",
+      "nom": "Petit",
+      "prenom": "Lucas",
+      "statut": "stagiaire",
+      "fonctions": [
+        "stagiaire"
+      ],
+      "disponibilites": {
+        "lundi": {
+          "debut": "09:00",
+          "fin": "17:00"
+        },
+        "mardi": {
+          "debut": "09:00",
+          "fin": "17:00"
+        }
+      },
+      "detachable": false,
+      "actif": true
+    },
+    {
+      "id": "e5",
+      "nom": "Faure",
+      "prenom": "Anne",
+      "statut": "titulaire",
+      "fonctions": [
+        "educateur"
+      ],
+      "disponibilites": {
+        "lundi": {
+          "debut": "09:00",
+          "fin": "17:00"
+        },
+        "mardi": {
+          "debut": "09:00",
+          "fin": "17:00"
+        }
+      },
+      "detachable": true,
+      "actif": true
+    },
+    {
+      "id": "r1",
+      "nom": "Interim 1",
+      "statut": "renfort",
+      "fonctions": [
+        "renfort"
+      ],
+      "disponibilites": {
+        "lundi": {
+          "debut": "09:00",
+          "fin": "16:30"
+        }
+      },
+      "detachable": false,
+      "actif": true
+    }
+  ],
+  "activites": [
+    {
+      "id": "a1",
+      "nom": "Atelier cuisine",
+      "dureePas": 2,
+      "sallesPossibles": [
+        "cuisine"
+      ],
+      "tagSalleRequis": null,
+      "capaciteJeunes": 4,
+      "educateursRequis": 1
+    },
+    {
+      "id": "a2",
+      "nom": "Classe",
+      "dureePas": 2,
+      "sallesPossibles": [
+        "s1"
+      ],
+      "capaciteJeunes": 8,
+      "educateursRequis": null
+    },
+    {
+      "id": "a3",
+      "nom": "Piscine",
+      "dureePas": 3,
+      "sallesPossibles": [
+        "ext"
+      ],
+      "capaciteJeunes": 6,
+      "educateursRequis": 3
+    },
+    {
+      "id": "a4",
+      "nom": "Snoezelen",
+      "dureePas": 2,
+      "sallesPossibles": [
+        "s2"
+      ],
+      "tagSalleRequis": "sensoriel",
+      "capaciteJeunes": 2,
+      "educateursRequis": null
+    },
+    {
+      "id": "a5",
+      "nom": "Sport adapte",
+      "dureePas": 2,
+      "sallesPossibles": [
+        "gym"
+      ],
+      "capaciteJeunes": 15,
+      "educateursRequis": null
+    },
+    {
+      "id": "a6",
+      "nom": "Orthophonie",
+      "dureePas": 2,
+      "sallesPossibles": [
+        "s2"
+      ],
+      "capaciteJeunes": 1,
+      "educateursRequis": 1
+    }
+  ],
+  "planningType": [
+    {
+      "id": "p101",
+      "jour": "lundi",
+      "debut": "09:00",
+      "pas": 2,
+      "activiteId": "a2",
+      "salleId": "s1",
+      "jeunes": [
+        "j1",
+        "j2"
+      ],
+      "educateurs": [
+        "e1",
+        "e2"
+      ],
+      "verrouille": false
+    },
+    {
+      "id": "p102",
+      "jour": "lundi",
+      "debut": "09:00",
+      "pas": 2,
+      "activiteId": "a1",
+      "salleId": "cuisine",
+      "jeunes": [
+        "j3",
+        "j4"
+      ],
+      "educateurs": [
+        "e3"
+      ],
+      "verrouille": false
+    },
+    {
+      "id": "p103",
+      "jour": "lundi",
+      "debut": "09:00",
+      "pas": 2,
+      "activiteId": "a4",
+      "salleId": "s2",
+      "jeunes": [
+        "j5"
+      ],
+      "educateurs": [
+        "e5"
+      ],
+      "verrouille": false
+    },
+    {
+      "id": "p104",
+      "jour": "lundi",
+      "debut": "09:00",
+      "pas": 2,
+      "activiteId": "a5",
+      "salleId": "gym",
+      "jeunes": [
+        "j6"
+      ],
+      "educateurs": [
+        "e4"
+      ],
+      "verrouille": false
+    },
+    {
+      "id": "p105",
+      "jour": "lundi",
+      "debut": "10:00",
+      "pas": 2,
+      "activiteId": "a5",
+      "salleId": "gym",
+      "jeunes": [
+        "j2",
+        "j3",
+        "j4",
+        "j6"
+      ],
+      "educateurs": [
+        "e3",
+        "e5"
+      ],
+      "verrouille": false
+    },
+    {
+      "id": "p106",
+      "jour": "lundi",
+      "debut": "10:00",
+      "pas": 2,
+      "activiteId": "a4",
+      "salleId": "s2",
+      "jeunes": [
+        "j1"
+      ],
+      "educateurs": [
+        "e1"
+      ],
+      "verrouille": false
+    },
+    {
+      "id": "p107",
+      "jour": "lundi",
+      "debut": "10:00",
+      "pas": 2,
+      "activiteId": "a2",
+      "salleId": "s1",
+      "jeunes": [
+        "j5"
+      ],
+      "educateurs": [
+        "e2"
+      ],
+      "verrouille": false
+    },
+    {
+      "id": "p108",
+      "jour": "lundi",
+      "debut": "11:00",
+      "pas": 2,
+      "activiteId": "a1",
+      "salleId": "cuisine",
+      "jeunes": [
+        "j3",
+        "j4"
+      ],
+      "educateurs": [
+        "e3"
+      ],
+      "verrouille": false
+    },
+    {
+      "id": "p109",
+      "jour": "lundi",
+      "debut": "11:00",
+      "pas": 2,
+      "activiteId": "a2",
+      "salleId": "s1",
+      "jeunes": [
+        "j1",
+        "j2"
+      ],
+      "educateurs": [
+        "e1",
+        "e2"
+      ],
+      "verrouille": false
+    },
+    {
+      "id": "p110",
+      "jour": "lundi",
+      "debut": "11:00",
+      "pas": 2,
+      "activiteId": "a6",
+      "salleId": "s2",
+      "jeunes": [
+        "j5"
+      ],
+      "educateurs": [
+        "e5"
+      ],
+      "verrouille": true
+    },
+    {
+      "id": "p111",
+      "jour": "lundi",
+      "debut": "11:00",
+      "pas": 2,
+      "activiteId": "a5",
+      "salleId": "gym",
+      "jeunes": [
+        "j6"
+      ],
+      "educateurs": [
+        "e4"
+      ],
+      "verrouille": false
+    },
+    {
+      "id": "p112",
+      "jour": "lundi",
+      "debut": "13:00",
+      "pas": 2,
+      "activiteId": "a2",
+      "salleId": "s1",
+      "jeunes": [
+        "j1",
+        "j2"
+      ],
+      "educateurs": [
+        "e1",
+        "e2"
+      ],
+      "verrouille": false
+    },
+    {
+      "id": "p113",
+      "jour": "lundi",
+      "debut": "13:00",
+      "pas": 2,
+      "activiteId": "a5",
+      "salleId": "gym",
+      "jeunes": [
+        "j3",
+        "j4",
+        "j6"
+      ],
+      "educateurs": [
+        "e3"
+      ],
+      "verrouille": false
+    },
+    {
+      "id": "p114",
+      "jour": "lundi",
+      "debut": "13:00",
+      "pas": 2,
+      "activiteId": "a4",
+      "salleId": "s2",
+      "jeunes": [
+        "j5"
+      ],
+      "educateurs": [
+        "e5"
+      ],
+      "verrouille": false
+    },
+    {
+      "id": "p115",
+      "jour": "lundi",
+      "debut": "14:00",
+      "pas": 2,
+      "activiteId": "a1",
+      "salleId": "cuisine",
+      "jeunes": [
+        "j3",
+        "j4"
+      ],
+      "educateurs": [
+        "e3"
+      ],
+      "verrouille": false
+    },
+    {
+      "id": "p116",
+      "jour": "lundi",
+      "debut": "14:00",
+      "pas": 2,
+      "activiteId": "a4",
+      "salleId": "s2",
+      "jeunes": [
+        "j1"
+      ],
+      "educateurs": [
+        "e1"
+      ],
+      "verrouille": false
+    },
+    {
+      "id": "p117",
+      "jour": "lundi",
+      "debut": "14:00",
+      "pas": 2,
+      "activiteId": "a2",
+      "salleId": "s1",
+      "jeunes": [
+        "j5"
+      ],
+      "educateurs": [
+        "e2"
+      ],
+      "verrouille": false
+    },
+    {
+      "id": "p118",
+      "jour": "lundi",
+      "debut": "14:00",
+      "pas": 2,
+      "activiteId": "a5",
+      "salleId": "gym",
+      "jeunes": [
+        "j2",
+        "j6"
+      ],
+      "educateurs": [
+        "e4"
+      ],
+      "verrouille": false
+    },
+    {
+      "id": "p119",
+      "jour": "lundi",
+      "debut": "15:00",
+      "pas": 2,
+      "activiteId": "a2",
+      "salleId": "s1",
+      "jeunes": [
+        "j1",
+        "j2"
+      ],
+      "educateurs": [
+        "e1",
+        "e2"
+      ],
+      "verrouille": false
+    },
+    {
+      "id": "p120",
+      "jour": "lundi",
+      "debut": "15:00",
+      "pas": 2,
+      "activiteId": "a5",
+      "salleId": "gym",
+      "jeunes": [
+        "j3",
+        "j4",
+        "j6"
+      ],
+      "educateurs": [
+        "e3"
+      ],
+      "verrouille": false
+    },
+    {
+      "id": "p121",
+      "jour": "lundi",
+      "debut": "15:00",
+      "pas": 2,
+      "activiteId": "a4",
+      "salleId": "s2",
+      "jeunes": [
+        "j5"
+      ],
+      "educateurs": [
+        "e5"
+      ],
+      "verrouille": false
+    },
+    {
+      "id": "p201",
+      "jour": "mardi",
+      "debut": "09:00",
+      "pas": 3,
+      "activiteId": "a3",
+      "salleId": "ext",
+      "jeunes": [
+        "j2",
+        "j3",
+        "j4",
+        "j6"
+      ],
+      "educateurs": [
+        "e1",
+        "e3",
+        "e5"
+      ],
+      "verrouille": false
+    },
+    {
+      "id": "p202",
+      "jour": "mardi",
+      "debut": "10:30",
+      "pas": 2,
+      "activiteId": "a1",
+      "salleId": "cuisine",
+      "jeunes": [
+        "j3",
+        "j4"
+      ],
+      "educateurs": [
+        "e3"
+      ],
+      "verrouille": false
+    },
+    {
+      "id": "p203",
+      "jour": "mardi",
+      "debut": "10:30",
+      "pas": 2,
+      "activiteId": "a5",
+      "salleId": "gym",
+      "jeunes": [
+        "j2",
+        "j6"
+      ],
+      "educateurs": [
+        "e4"
+      ],
+      "verrouille": false
+    }
+  ],
+  "regles": [
+    {
+      "id": "r001",
+      "type": "educateurs_autorises",
+      "dure": true,
+      "actif": true,
+      "cibles": {
+        "jeunes": [
+          "j1"
+        ]
+      },
+      "params": {
+        "educateurs": [
+          "e1",
+          "e2"
+        ],
+        "mode": "exclusif"
+      },
+      "commentaire": "L.M. uniquement avec Marie ou Karim (decision reunion du 02/09)"
+    },
+    {
+      "id": "r002",
+      "type": "binome_jeunes",
+      "dure": false,
+      "poids": 60,
+      "actif": true,
+      "cibles": {
+        "jeunes": [
+          "j3",
+          "j4"
+        ]
+      },
+      "params": {
+        "educateursRequis": 1
+      },
+      "commentaire": "Fonctionnent bien ensemble, 1 seul educateur suffit"
+    },
+    {
+      "id": "r003",
+      "type": "rotation_educateur",
+      "dure": false,
+      "poids": 80,
+      "actif": true,
+      "cibles": {
+        "jeunes": [
+          "j5"
+        ]
+      },
+      "params": {
+        "tousLesPas": 2
+      },
+      "commentaire": "Educateur different toutes les heures (fatigabilite relationnelle)"
+    },
+    {
+      "id": "r004",
+      "type": "quota_detachement",
+      "dure": true,
+      "actif": true,
+      "cibles": {
+        "educateurs": [
+          "e2"
+        ]
+      },
+      "params": {
+        "maxPasParJour": 4,
+        "maxPasParSemaine": 12
+      },
+      "commentaire": "Karim detache 2 h/jour maximum (mission transversale)"
+    },
+    {
+      "id": "r005",
+      "type": "perimetre_renfort",
+      "dure": true,
+      "actif": true,
+      "cibles": {
+        "educateurs": [
+          "r1"
+        ]
+      },
+      "params": {
+        "jeunesAutorises": [
+          "j3",
+          "j4",
+          "j6"
+        ]
+      },
+      "commentaire": "Interim : seulement sur les jeunes sans besoin specifique"
+    },
+    {
+      "id": "r006",
+      "type": "educateurs_interdits",
+      "dure": true,
+      "actif": true,
+      "cibles": {
+        "jeunes": [
+          "j5"
+        ]
+      },
+      "params": {
+        "educateurs": [
+          "e4"
+        ]
+      },
+      "commentaire": "Pas de stagiaire seul avec N.K. (accompagnement 1:1)"
+    },
+    {
+      "id": "r007",
+      "type": "taux_encadrement",
+      "dure": true,
+      "actif": true,
+      "cibles": {
+        "groupes": [
+          "g1"
+        ]
+      },
+      "params": {
+        "ratioJeunesParEduc": 4
+      },
+      "commentaire": "Plancher institutionnel : jamais plus de 4 jeunes par educateur sur le groupe A"
+    },
+    {
+      "id": "r008",
+      "type": "salle_requise",
+      "dure": true,
+      "actif": true,
+      "cibles": {
+        "activites": [
+          "a4"
+        ]
+      },
+      "params": {
+        "tag": "sensoriel"
+      },
+      "commentaire": "Le snoezelen exige une salle equipee"
+    },
+    {
+      "id": "r009",
+      "type": "presence_minimale",
+      "dure": true,
+      "actif": true,
+      "cibles": {
+        "groupes": [
+          "g2"
+        ]
+      },
+      "params": {
+        "educMin": 1
+      },
+      "commentaire": "Le groupe B n'est jamais sans adulte referent"
+    },
+    {
+      "id": "r010",
+      "type": "indisponibilite_recurrente",
+      "dure": true,
+      "actif": true,
+      "cibles": {
+        "educateurs": [
+          "e4"
+        ]
+      },
+      "params": {
+        "jour": "mardi",
+        "debut": "14:00",
+        "fin": "16:00"
+      },
+      "commentaire": "Lucas est en cours le mardi apres-midi"
+    },
+    {
+      "id": "r011",
+      "type": "continuite_journee",
+      "dure": false,
+      "poids": 40,
+      "actif": true,
+      "cibles": {
+        "jeunes": [
+          "j1"
+        ]
+      },
+      "params": {
+        "maxChangements": 5,
+        "sur": "educateurs"
+      },
+      "commentaire": "Limiter les ruptures dans la journee de L.M."
+    },
+    {
+      "id": "r012",
+      "type": "jeunes_incompatibles",
+      "dure": true,
+      "actif": true,
+      "cibles": {
+        "jeunes": [
+          "j2",
+          "j5"
+        ]
+      },
+      "commentaire": "Conflit persistant, a reevaluer en janvier"
+    }
+  ]
+}
