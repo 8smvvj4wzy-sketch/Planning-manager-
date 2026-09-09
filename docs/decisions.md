@@ -323,3 +323,39 @@ lire comme un binôme (« Angie (pas dispo) ») est mise de côté dans `restes`
 
 Le résultat assemblé passe par la **même validation** que n'importe quel fichier
 (`valideStructure`) avant d'être chargeable : rien ne contourne le contrat.
+
+## 10. Le chiffrement de l'export
+
+Reprise **à l'identique** du schéma de DatABA / DatABA Manager
+(`src/App.jsx:155-185` de DatABA Manager) : WebCrypto, PBKDF2-SHA256 à 150 000
+itérations, sel de 16 octets, AES-GCM-256, IV de 12 octets, enveloppe
+`{ format, version, salt, iv, data }` en base64. Seul le tag change —
+`format: 'planning-ime-encrypted'` — pour qu'un fichier DatABA ne soit jamais pris pour
+un planning, et inversement.
+
+Même schéma dans les trois applications, délibérément : les habitudes et le niveau de
+protection restent les mêmes, et un dépôt qui sait déchiffrer l'un sait déchiffrer
+l'autre sans rien adapter.
+
+Trois réserves, assumées :
+
+1. **Le chiffrement n'anonymise pas.** Il protège le fichier en transit ; quiconque a la
+   phrase de passe lit les prénoms. Si la phrase circule dans la même boîte mail que le
+   fichier, la protection est surtout formelle — l'écran d'export le rappelle au moment
+   de la saisir.
+2. **150 000 itérations PBKDF2** est un peu bas pour une phrase de passe humaine en
+   2026. Choix de parité avec DatABA plutôt que de créer un second standard dans le
+   même écosystème ; monter se ferait dans les trois applications ensemble, pas dans
+   une seule.
+3. **Le contrat de schéma s'affaiblit.** Un fichier chiffré n'est plus validable par un
+   autre outil sans la clé. D'où l'export en clair, toujours proposé à côté — c'est lui
+   qui reste le contrat lisible.
+
+Détail technique qui a demandé une décision : les types WebCrypto (`CryptoKey`,
+`KeyUsage`, `BufferSource`) ne sont pas globaux sans la lib DOM, que ce dépôt exclut
+délibérément du moteur (« il ne connaît ni React ni le DOM », `CLAUDE.md`). Plutôt que
+d'ajouter `"DOM"` à `tsconfig.json` — ce qui ouvrirait tout `src/` aux globals du
+navigateur — `src/transport/chiffrement.ts` importe ces trois noms en **type seul**
+depuis `node:crypto` (`import type { webcrypto } from 'node:crypto'`), effacé à la
+compilation comme dans le navigateur. Aucune valeur n'en vient : `crypto.subtle` et
+`crypto.getRandomValues` restent le global standard, identique en Node et en navigateur.

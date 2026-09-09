@@ -33,6 +33,7 @@ import {
   Trash2,
   Upload,
   Library,
+  Lock,
   Users,
   Wrench,
   X,
@@ -45,9 +46,12 @@ import {
   auditeJourNominal,
   calculDisponibilite,
   catalogue,
+  chiffre,
   comparePeriodes,
+  dechiffre,
   decoupeTableau,
   educateursLibres,
+  estEnveloppeChiffree,
   etatJourNominal,
   jeunesSansAffectation,
   litPlanning,
@@ -2184,7 +2188,7 @@ function EcranFichiers({
   const [messageStructure, setMessageStructure] = useState(null);
   const [messagePeriode, setMessagePeriode] = useState(null);
 
-  const deposerStructure = (texte, nom) => {
+  const deposerStructure = async (texte, nom) => {
     let donnees;
     try {
       donnees = JSON.parse(texte);
@@ -2192,6 +2196,25 @@ function EcranFichiers({
       setMessageStructure({ ton: 'alerte', texte: `${nom} n’est pas du JSON valide : ${e.message}` });
       return;
     }
+
+    // Une enveloppe chiffrée n'est pas un structure.json : on la reconnaît
+    // avant de tenter quoi que ce soit d'autre, et on demande la phrase de
+    // passe pour en sortir le contenu — qui repasse ensuite par le même
+    // contrôle que n'importe quel fichier en clair.
+    if (estEnveloppeChiffree(donnees)) {
+      const phrase = window.prompt(`${nom} est chiffré. Phrase de passe :`);
+      if (phrase === null) return;
+      try {
+        donnees = await dechiffre(donnees, phrase);
+      } catch (e) {
+        setMessageStructure({
+          ton: 'alerte',
+          texte: e instanceof Error ? e.message : String(e),
+        });
+        return;
+      }
+    }
+
     const resultat = valideStructure(donnees);
     if (!resultat.valide) {
       setMessageStructure({
@@ -2243,23 +2266,43 @@ function EcranFichiers({
     setMessagePeriode({ ton: 'succes', texte: `${nom} chargé.`, problemes: resultat.problemes });
   };
 
-  const exporterStructure = () => {
+  const prochaineVersion = () => {
     const version = window.prompt(
       'Numéro de version pour l’export.\n\n' +
         'Il s’incrémente à chaque envoi : c’est ce qui permet de refuser un fichier périmé à la réception.',
       String(structure.meta.version + 1),
     );
-    if (version === null) return;
+    if (version === null) return null;
     const n = Number(version);
     if (!Number.isInteger(n) || n < 1) {
       window.alert('Version invalide : un entier positif est attendu.');
+      return null;
+    }
+    return { ...structure, meta: { ...structure.meta, version: n, dateModification: aujourdhui() } };
+  };
+
+  const exporterStructure = () => {
+    const sortie = prochaineVersion();
+    if (!sortie) return;
+    telecharger(`structure-v${sortie.meta.version}.json`, `${JSON.stringify(sortie, null, 2)}\n`);
+  };
+
+  const exporterStructureChiffree = async () => {
+    const sortie = prochaineVersion();
+    if (!sortie) return;
+    const phrase = window.prompt(
+      'Phrase de passe pour ce fichier.\n\n' +
+        'Elle protège le fichier en transit, mais elle n’anonymise rien : qui la connaît lit les prénoms. ' +
+        'À transmettre par un autre canal que le fichier lui-même.',
+    );
+    if (!phrase) return;
+    const confirmation = window.prompt('Retapez la même phrase de passe, pour confirmer :');
+    if (confirmation !== phrase) {
+      window.alert('Les deux phrases ne correspondent pas : rien n’a été exporté.');
       return;
     }
-    const sortie = {
-      ...structure,
-      meta: { ...structure.meta, version: n, dateModification: aujourdhui() },
-    };
-    telecharger(`structure-v${n}.json`, `${JSON.stringify(sortie, null, 2)}\n`);
+    const enveloppe = await chiffre(sortie, phrase);
+    telecharger(`structure-v${sortie.meta.version}.chiffre.json`, `${JSON.stringify(enveloppe, null, 2)}\n`);
   };
 
   return (
@@ -2276,9 +2319,14 @@ function EcranFichiers({
         sousTitre="Le fichier qui circule par mail — celui qui définit tout ce que le moteur sait faire"
         actions={
           structure && (
-            <Bouton icone={Download} onClick={exporterStructure}>
-              Exporter
-            </Bouton>
+            <>
+              <Bouton icone={Download} onClick={exporterStructure}>
+                Exporter
+              </Bouton>
+              <Bouton icone={Lock} onClick={exporterStructureChiffree}>
+                Exporter (chiffré)
+              </Bouton>
+            </>
           )
         }
       >
@@ -2308,7 +2356,7 @@ function EcranFichiers({
 
         <ZoneDepot
           libelle="Déposer un structure.json"
-          aide="Le fichier est validé avant d’être chargé : en cas d’erreur, rien n’est remplacé."
+          aide="Le fichier est validé avant d’être chargé : en cas d’erreur, rien n’est remplacé. Un fichier chiffré est reconnu automatiquement."
           onFichier={deposerStructure}
         />
 

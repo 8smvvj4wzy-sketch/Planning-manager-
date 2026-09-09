@@ -77,6 +77,15 @@ tests et n'est jamais importé depuis `interface/`.
 - **Une modale ne retient que l'identité de ce qu'elle affiche**, jamais l'objet : le
   détail d'un créneau garde son `creneauId` et relit le planning à chaque rendu, sinon
   il fige l'état du moment du clic pendant que le planning change derrière.
+- **Les types WebCrypto ne sont pas globaux sans la lib DOM.** `src/transport/chiffrement.ts`
+  les importe en type seul depuis `node:crypto` (`import type { webcrypto } from
+  'node:crypto'`) plutôt que d'ajouter `"DOM"` à `tsconfig.json`, ce qui ouvrirait tout
+  le moteur aux globals du navigateur. Effacé à la compilation, comme dans le
+  navigateur ; `crypto.subtle` reste le global standard des deux côtés.
+- **Le chiffrement n'anonymise pas.** `chiffre`/`dechiffre` (`src/transport/chiffrement.ts`)
+  protègent un fichier en transit, pas son contenu pour qui a la phrase de passe.
+  L'export en clair reste toujours disponible à côté : c'est lui le contrat lisible par
+  un autre outil.
 
 ## Avant toute livraison
 

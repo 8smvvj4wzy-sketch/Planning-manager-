@@ -142,3 +142,12 @@ export {
   type OptionsAssemblage,
   type ResultatAssemblage,
 } from './import/assemblage.ts';
+
+export {
+  ErreurDechiffrement,
+  FORMAT_CHIFFRE,
+  chiffre,
+  dechiffre,
+  estEnveloppeChiffree,
+  type EnveloppeChiffree,
+} from './transport/chiffrement.ts';
