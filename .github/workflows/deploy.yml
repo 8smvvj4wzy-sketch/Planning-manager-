@@ -36,7 +36,16 @@ jobs:
           node-version: 22
       - run: npm install
       - run: npm run build:interface
+      # `enablement: true` : GitHub Pages n'est activé pour aucun dépôt tant que
+      # personne — humain ou action — ne l'a fait une première fois. Sans ce
+      # paramètre, configure-pages échoue sur un dépôt qui n'a jamais eu Pages
+      # activé (« Get Pages site failed... Not Found »), et le job deploy est
+      # sauté en conséquence — c'est ce qui s'est produit ici. Le jeton du
+      # workflow (permissions.pages: write, ci-dessus) suffit à l'activer via
+      # l'API sans passer par Settings → Pages.
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: ./dist
