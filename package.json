@@ -1,0 +1,33 @@
+{
+  "name": "planning-ime",
+  "version": "0.1.0",
+  "description": "Moteur de planning IME : schema structure.json/jour.json, moteur de regles et solveur de reparation",
+  "type": "module",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "node": ">=22.18"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "schemas"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.check.json",
+    "test": "node --test test/*.test.ts",
+    "valider": "node scripts/valider.ts"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}

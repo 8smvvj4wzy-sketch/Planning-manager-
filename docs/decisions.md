@@ -1,0 +1,157 @@
+# Décisions
+
+Ce document répond aux « points à trancher avant de coder » de la spécification,
+et consigne les écarts assumés par rapport à celle-ci. Toutes ces décisions sont
+réversibles : elles vivent dans `OptionsMoteur` (`src/moteur/options.ts`), pas
+dans le code du solveur.
+
+---
+
+## 1. Le coût d'un changement
+
+**Question.** Quand le moteur répare, faut-il minimiser le nombre de jeunes
+impactés, ou le nombre d'éducateurs déplacés ?
+
+**Décision.** Les jeunes d'abord (`priorite: 'jeunes'`, valeur par défaut). Une
+journée bousculée coûte plus cher à un jeune qu'à un adulte : c'est lui qui subit
+la rupture de repère, pas l'équipe. Le barème :
+
+| poste | `priorite: 'jeunes'` | `priorite: 'educateurs'` |
+|---|---|---|
+| `jeuneImpacte` | 100 | 40 |
+| `educateurDeplace` | 40 | 100 |
+| `creneauModifie` | 10 | 10 |
+| `creneauNonResolu` | 10 000 | 10 000 |
+| `mobilisationDetache` | 150 | 150 |
+| `recoursRenfort` | 25 | 25 |
+
+`creneauNonResolu` est volontairement à deux ordres de grandeur au-dessus du
+reste : le moteur doit toujours préférer une journée bancale à une journée avec
+un groupe non encadré.
+
+Basculer le curseur ne demande pas de recompiler :
+
+```ts
+repare(ref, jour, { priorite: 'educateurs' });
+repare(ref, jour, { couts: { recoursRenfort: 200 } }); // « l'intérim en dernier recours »
+```
+
+**À vérifier sur le terrain.** Le rapport 100/40 est un pari. Faites tourner les
+deux priorités sur trois journées réelles et comparez les plannings avant de le
+figer.
+
+---
+
+## 2. Détachement
+
+**Question.** Un éducateur détaché est-il retiré du terrain (donc indisponible),
+ou reste-t-il mobilisable en urgence ?
+
+**Décision.** Mobilisable, mais cher (`detachement: 'mobilisable'`, par défaut).
+C'est ce qui se passe en vrai : on ne rappelle pas quelqu'un d'une mission
+transversale pour un confort d'organisation, on le rappelle quand il n'y a plus
+d'autre solution. Le surcoût `mobilisationDetache` (150) place le détaché
+derrière toutes les autres options sans jamais l'exclure.
+
+Les trois modes :
+
+- `indisponible` — le détaché sort du calcul des effectifs. Plus lisible pour les
+  équipes, mais produit des conflits là où une solution existait.
+- `mobilisable` — le détaché reste candidat, en dernier.
+- `libre` — le détachement n'a aucun effet sur la disponibilité.
+
+**Définition retenue de « détaché ».** Un éducateur est détaché sur un créneau
+si aucun des jeunes présents n'appartient à un groupe dont il est éducateur de
+référence (`src/detachement.ts`). C'est ce compte que plafonne la règle
+`quota_detachement`. Un éducateur sans groupe de référence n'est jamais compté
+comme détaché — sinon un remplaçant serait détaché en permanence.
+
+Un éducateur dont `detachable` vaut `false` n'est jamais placé hors de son
+périmètre de référence, quel que soit le mode.
+
+---
+
+## 3. Encadrement fractionnaire
+
+**Question.** Garder le champ `encadrement` en décimal (0.33), ou passer à un
+`taux_encadrement` par groupe, plus rustique mais plus lisible ?
+
+**Décision.** Le décimal est conservé (`encadrement: 'individuel'`, par défaut),
+avec le mode `ratioGroupe` disponible en une ligne d'option. Deux raisons :
+
+1. Le décimal porte une information que le ratio de groupe perd — le jeune en 1:1
+   et celui qui « compte pour un tiers » sont dans le même groupe.
+2. Les deux modes cohabitent sans conflit : la règle `taux_encadrement` reste un
+   plafond dur dans les deux cas. En mode `individuel` elle vérifie, en mode
+   `ratioGroupe` elle dimensionne.
+
+**Le piège d'arrondi, réglé.** `0.33 × 3 = 0.99` en virgule flottante, et un
+`Math.ceil` naïf donnait 1 ici et 2 ailleurs selon l'ordre des additions. La
+somme est arrondie à trois décimales avant plafonnement
+(`arrondiStable`, `src/encadrement.ts`), et un test le verrouille.
+
+Ordre de décision de l'effectif requis sur un créneau :
+
+1. une règle `binome_jeunes` active qui couvre exactement les jeunes présents ;
+2. `activite.educateursRequis`, s'il est renseigné ;
+3. le mode d'encadrement retenu.
+
+---
+
+## Écarts et précisions par rapport à la spécification
+
+Ces points n'étaient pas tranchés par le document d'origine ; ils le sont ici.
+
+**`educateurs_autorises` est exclusif par défaut.** « L.M. uniquement avec Marie
+ou Karim » se lit : *tout* éducateur présent sur un créneau de L.M. doit figurer
+dans la liste. C'est la lecture la plus sûre pour une règle dure, mais elle
+interdit à L.M. les activités collectives à trois adultes. Un paramètre
+`mode: "au-moins-un"` relâche la contrainte quand c'est le sens voulu.
+
+**`quota_detachement.maxPasParSemaine` n'est pas évaluable sur une journée.**
+Il est vérifié par `evalueSemaine()`, sur l'ensemble des journées de la semaine.
+`maxPasParJour` reste évalué à chaque réparation.
+
+**`continuite_journee` prend un paramètre `sur`.** Les ruptures se comptent par
+défaut sur l'équipe d'éducateurs ; `sur: "salle"` ou `sur: "activite"` comptent
+les autres formes de rupture.
+
+**`rotation_educateur` accepte `fenetre` en plus de `tousLesPas`.**
+`tousLesPas` plafonne une séquence continue avec le même éducateur ; `fenetre`
+exige au moins deux éducateurs différents sur toute fenêtre glissante.
+
+**Une absence est soit `journee: true`, soit `debut` + `fin`.** Le schéma refuse
+la combinaison des deux, qui n'a pas de sens univoque.
+
+**Un éducateur partiellement absent est retiré de tout le créneau.** Il ne peut
+pas en assurer la totalité ; le solveur lui cherche un remplaçant pour l'ensemble.
+
+**Un créneau `verrouille` peut recevoir un éducateur, jamais en perdre un.**
+« Le moteur contournera au lieu de le déplacer » : contourner veut dire ne pas y
+puiser. Ajouter quelqu'un sur un créneau sous-encadré ne le déplace pas, et c'est
+souvent la seule façon de le sauver. Idem pour un créneau épinglé dans `jour.json`.
+
+**L'admissibilité se juge en écart, pas dans l'absolu.** Un planning en cours de
+réparation viole déjà des règles dures — c'est ce qu'on répare. Le solveur
+accepte donc un candidat qui *n'ajoute pas* de violation, plutôt que d'exiger un
+essai irréprochable. Sans cela, un créneau cassé quelque part bloquerait toute
+réparation ailleurs.
+
+---
+
+## Ce que le solveur ne fait pas
+
+Il faut le savoir avant de s'appuyer dessus :
+
+- **Il ne déplace pas les jeunes.** Il ne change ni les horaires, ni les salles,
+  ni la composition des groupes. Il affecte et réaffecte des éducateurs. Un
+  créneau qu'aucun adulte ne peut couvrir devient un conflit signalé, pas un
+  créneau déplacé.
+- **Il ne crée pas de créneau.** Un jeune présent sans activité apparaît dans
+  `jeunesSansAffectation()`, à l'humain de trancher.
+- **Sa recherche est gloutonne**, pas exhaustive : premier comblement au moindre
+  coût, puis substitutions tant que le coût baisse. Sur des plannings de cette
+  taille (quelques dizaines de créneaux) le résultat est bon et surtout
+  explicable — chaque changement porte son motif. Il n'est pas garanti optimal.
+- **Il ne répare qu'une journée à la fois.** Les quotas hebdomadaires se
+  vérifient après coup, ils ne guident pas la recherche.

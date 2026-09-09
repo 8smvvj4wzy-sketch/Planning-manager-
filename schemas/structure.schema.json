@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://planning-ime.local/schemas/structure.schema.json",
+  "title": "structure.json — Planning IME",
+  "type": "object",
+  "required": ["meta", "grille", "salles", "groupes", "jeunes", "educateurs", "activites", "planningType", "regles"],
+  "additionalProperties": false,
+  "properties": {
+    "meta": { "$ref": "#/$defs/meta" },
+    "grille": { "$ref": "#/$defs/grille" },
+    "salles": { "type": "array", "items": { "$ref": "#/$defs/salle" } },
+    "groupes": { "type": "array", "items": { "$ref": "#/$defs/groupe" } },
+    "jeunes": { "type": "array", "items": { "$ref": "#/$defs/jeune" } },
+    "educateurs": { "type": "array", "items": { "$ref": "#/$defs/educateur" } },
+    "activites": { "type": "array", "items": { "$ref": "#/$defs/activite" } },
+    "planningType": { "type": "array", "items": { "$ref": "#/$defs/creneauType" } },
+    "regles": { "type": "array", "items": { "$ref": "#/$defs/regle" } }
+  },
+  "$defs": {
+    "heure": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" },
+    "dateIso": { "type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$" },
+    "identifiant": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9_-]+$" },
+    "jour": {
+      "type": "string",
+      "enum": ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+    },
+    "plage": {
+      "type": "object",
+      "required": ["debut", "fin"],
+      "additionalProperties": false,
+      "properties": {
+        "debut": { "$ref": "#/$defs/heure" },
+        "fin": { "$ref": "#/$defs/heure" }
+      }
+    },
+    "semainePlages": {
+      "type": "object",
+      "additionalProperties": false,
+      "propertyNames": { "$ref": "#/$defs/jour" },
+      "patternProperties": { "^(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)$": { "$ref": "#/$defs/plage" } }
+    },
+    "meta": {
+      "type": "object",
+      "required": ["version", "dateModification", "auteur", "etablissement"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "type": "integer", "minimum": 1 },
+        "dateModification": { "$ref": "#/$defs/dateIso" },
+        "auteur": { "type": "string", "minLength": 1 },
+        "etablissement": { "type": "string", "minLength": 1 },
+        "libelle": { "type": "string" }
+      }
+    },
+    "grille": {
+      "type": "object",
+      "required": ["pasMinutes", "jours", "debut", "fin"],
+      "additionalProperties": false,
+      "properties": {
+        "pasMinutes": { "type": "integer", "minimum": 5, "maximum": 240 },
+        "jours": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/jour" } },
+        "debut": { "$ref": "#/$defs/heure" },
+        "fin": { "$ref": "#/$defs/heure" },
+        "pauses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["debut", "pas", "libelle"],
+            "additionalProperties": false,
+            "properties": {
+              "debut": { "$ref": "#/$defs/heure" },
+              "pas": { "type": "integer", "minimum": 1 },
+              "libelle": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "salle": {
+      "type": "object",
+      "required": ["id", "nom", "capacite"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/identifiant" },
+        "nom": { "type": "string", "minLength": 1 },
+        "capacite": { "type": "integer", "minimum": 0 },
+        "tags": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "groupe": {
+      "type": "object",
+      "required": ["id", "nom"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/identifiant" },
+        "nom": { "type": "string", "minLength": 1 },
+        "refEducateurs": { "type": "array", "items": { "$ref": "#/$defs/identifiant" } }
+      }
+    },
+    "jeune": {
+      "type": "object",
+      "required": ["id", "initiales", "encadrement", "presence", "actif"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/identifiant" },
+        "initiales": { "type": "string", "minLength": 1, "maxLength": 8 },
+        "groupeId": { "$ref": "#/$defs/identifiant" },
+        "encadrement": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
+        "presence": { "$ref": "#/$defs/semainePlages" },
+        "actif": { "type": "boolean" }
+      }
+    },
+    "educateur": {
+      "type": "object",
+      "required": ["id", "nom", "statut", "disponibilites", "detachable", "actif"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/identifiant" },
+        "nom": { "type": "string", "minLength": 1 },
+        "prenom": { "type": "string" },
+        "statut": { "type": "string", "enum": ["titulaire", "renfort", "autre-batiment", "stagiaire"] },
+        "fonctions": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "disponibilites": { "$ref": "#/$defs/semainePlages" },
+        "detachable": { "type": "boolean" },
+        "actif": { "type": "boolean" }
+      }
+    },
+    "activite": {
+      "type": "object",
+      "required": ["id", "nom", "dureePas"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/identifiant" },
+        "nom": { "type": "string", "minLength": 1 },
+        "dureePas": { "type": "integer", "minimum": 1 },
+        "sallesPossibles": { "type": "array", "items": { "$ref": "#/$defs/identifiant" } },
+        "tagSalleRequis": { "type": ["string", "null"] },
+        "capaciteJeunes": { "type": ["integer", "null"], "minimum": 0 },
+        "educateursRequis": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "creneauType": {
+      "type": "object",
+      "required": ["id", "jour", "debut", "pas", "activiteId", "jeunes", "educateurs", "verrouille"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/identifiant" },
+        "jour": { "$ref": "#/$defs/jour" },
+        "debut": { "$ref": "#/$defs/heure" },
+        "pas": { "type": "integer", "minimum": 1 },
+        "activiteId": { "$ref": "#/$defs/identifiant" },
+        "salleId": { "anyOf": [{ "$ref": "#/$defs/identifiant" }, { "type": "null" }] },
+        "jeunes": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/identifiant" } },
+        "educateurs": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/identifiant" } },
+        "verrouille": { "type": "boolean" }
+      }
+    },
+    "regle": {
+      "type": "object",
+      "required": ["id", "type", "dure", "actif", "cibles"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/identifiant" },
+        "type": { "type": "string", "minLength": 1 },
+        "dure": { "type": "boolean" },
+        "poids": { "type": "number", "minimum": 0 },
+        "actif": { "type": "boolean" },
+        "cibles": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "jeunes": { "type": "array", "items": { "$ref": "#/$defs/identifiant" } },
+            "educateurs": { "type": "array", "items": { "$ref": "#/$defs/identifiant" } },
+            "groupes": { "type": "array", "items": { "$ref": "#/$defs/identifiant" } },
+            "activites": { "type": "array", "items": { "$ref": "#/$defs/identifiant" } },
+            "salles": { "type": "array", "items": { "$ref": "#/$defs/identifiant" } }
+          }
+        },
+        "params": { "type": "object" },
+        "commentaire": { "type": "string" }
+      }
+    }
+  }
+}

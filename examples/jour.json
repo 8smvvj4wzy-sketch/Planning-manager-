@@ -1,0 +1,31 @@
+{
+  "structureVersion": 7,
+  "date": "2026-09-14",
+  "absences": [
+    {
+      "type": "educateur",
+      "id": "e3",
+      "journee": true,
+      "motif": "arret maladie"
+    },
+    {
+      "type": "educateur",
+      "id": "e5",
+      "debut": "13:30",
+      "fin": "16:30",
+      "motif": "reunion exterieure"
+    },
+    {
+      "type": "jeune",
+      "id": "j5",
+      "journee": true
+    }
+  ],
+  "renfortsDuJour": [
+    "r1"
+  ],
+  "epingles": [
+    "p110"
+  ],
+  "affectationsManuelles": []
+}
