@@ -6,9 +6,11 @@
 
 import { Referentiel } from '../referentiel.ts';
 import { evaluateurDe, typesConnus } from '../regles/registre.ts';
+import { comparerDates } from '../dates.ts';
+import { finDeLaPeriode } from '../moteur/periode.ts';
 import { jourDeLaDate } from '../moteur/etatJour.ts';
 import { heureEnMinutes } from '../temps.ts';
-import type { FichierJour, Structure } from '../types.ts';
+import type { FichierJour, FichierPeriode, Structure } from '../types.ts';
 import { avertissement, erreur, type Probleme } from './resultat.ts';
 
 function doublons(ids: readonly string[]): string[] {
@@ -427,6 +429,88 @@ export function verifieCoherenceJour(ref: Referentiel, fichier: FichierJour): Pr
     } else if (educateur.statut !== 'renfort') {
       problemes.push(
         avertissement('renfort.statut', `/renfortsDuJour/${i}`, `${ref.libelleEducateur(id)} n'a pas le statut "renfort"`),
+      );
+    }
+  });
+
+  (fichier.epingles ?? []).forEach((id, i) => {
+    if (!ref.creneauxType.has(id)) {
+      problemes.push(erreur('reference', `/epingles/${i}`, `creneau inconnu dans le planning type : "${id}"`));
+    }
+  });
+
+  return problemes;
+}
+
+/** Coherence d'un `periode.json` face a la structure sur laquelle il est construit. */
+export function verifieCoherencePeriode(ref: Referentiel, fichier: FichierPeriode): Probleme[] {
+  const problemes: Probleme[] = [];
+
+  if (fichier.structureVersion !== ref.structure.meta.version) {
+    problemes.push(
+      erreur(
+        'periode.version',
+        '/structureVersion',
+        `construite sur la structure v${fichier.structureVersion}, or la structure chargee est en v${ref.structure.meta.version}`,
+      ),
+    );
+  }
+
+  if (fichier.au && comparerDates(fichier.au, fichier.du) < 0) {
+    problemes.push(erreur('periode.intervalle', '/au', `${fichier.au} precede ${fichier.du}`));
+  }
+
+  // Une absence sans terme sur une periode sans terme n'a pas de fin : le
+  // moteur leve plutot que de produire une serie infinie, autant le dire ici.
+  try {
+    finDeLaPeriode(fichier);
+  } catch (e) {
+    problemes.push(erreur('periode.sans-fin', '/au', e instanceof Error ? e.message : String(e)));
+  }
+
+  fichier.absences.forEach((absence, i) => {
+    const table = absence.type === 'jeune' ? ref.jeunes : ref.educateurs;
+    if (!table.has(absence.id)) {
+      problemes.push(erreur('reference', `/absences/${i}/id`, `${absence.type} inconnu : "${absence.id}"`));
+    }
+    if (absence.au && comparerDates(absence.au, absence.du) < 0) {
+      problemes.push(
+        erreur('absence.intervalle', `/absences/${i}/au`, `${absence.au} precede ${absence.du}`),
+      );
+    }
+    if (absence.debut && absence.fin && heureEnMinutes(absence.fin) <= heureEnMinutes(absence.debut)) {
+      problemes.push(erreur('absence.plage', `/absences/${i}`, 'fin anterieure ou egale au debut'));
+    }
+    // Une absence entierement hors de la periode ne produit rien : c'est licite
+    // mais c'est presque toujours une date mal saisie.
+    const fin = fichier.au;
+    if (fin && comparerDates(absence.du, fin) > 0) {
+      problemes.push(
+        avertissement(
+          'absence.hors-periode',
+          `/absences/${i}`,
+          `commence le ${absence.du}, apres la fin de la periode (${fin}) : sans effet`,
+        ),
+      );
+    }
+    if (absence.au && comparerDates(absence.au, fichier.du) < 0) {
+      problemes.push(
+        avertissement(
+          'absence.hors-periode',
+          `/absences/${i}`,
+          `se termine le ${absence.au}, avant le debut de la periode (${fichier.du}) : sans effet`,
+        ),
+      );
+    }
+  });
+
+  (fichier.renforts ?? []).forEach((id, i) => {
+    const educateur = ref.educateur(id);
+    if (!educateur) {
+      problemes.push(erreur('reference', `/renforts/${i}`, `educateur inconnu : "${id}"`));
+    } else if (educateur.statut !== 'renfort') {
+      problemes.push(
+        avertissement('renfort.statut', `/renforts/${i}`, `${ref.libelleEducateur(id)} n'a pas le statut "renfort"`),
       );
     }
   });

@@ -258,6 +258,50 @@ export interface Absence {
   motif?: string;
 }
 
+/**
+ * Une absence qui court sur plusieurs jours.
+ *
+ * `du` / `au` bornent les JOURS ; `journee` ou `debut` / `fin` decoupent les
+ * HEURES a l'interieur de chacun. « Lucas absent du 14 au 19 » et « Lucas
+ * absent tous les apres-midis du 14 au 19 » s'ecrivent donc pareil, aux heures
+ * pres.
+ */
+export interface AbsencePeriode {
+  type: 'educateur' | 'jeune';
+  id: string;
+  /** Premier jour d'absence, inclus. */
+  du: DateIso;
+  /** Dernier jour d'absence, inclus. Absent = jusqu'a nouvel ordre. */
+  au?: DateIso;
+  journee?: boolean;
+  debut?: Heure;
+  fin?: Heure;
+  motif?: string;
+}
+
+/**
+ * Une situation qui dure, et les plannings qu'elle appelle.
+ *
+ * Le fichier du jour reste l'unite atomique du moteur : la periode se projette
+ * sur chaque date d'accueil et produit un `FichierJour`. Rien du solveur n'est
+ * reecrit pour autant.
+ */
+export interface FichierPeriode {
+  structureVersion: number;
+  /** Premier jour examine. */
+  du: DateIso;
+  /**
+   * Dernier jour examine. Deduit de la derniere fin d'absence quand il est
+   * absent — et alors OBLIGATOIRE si une absence court sans terme, sans quoi la
+   * serie n'aurait pas de fin.
+   */
+  au?: DateIso;
+  absences: AbsencePeriode[];
+  /** Renforts mobilisables sur toute la periode. */
+  renforts?: string[];
+  epingles?: string[];
+}
+
 export interface FichierJour {
   /** Version de `structure.json` sur laquelle ce fichier a ete construit. */
   structureVersion: number;

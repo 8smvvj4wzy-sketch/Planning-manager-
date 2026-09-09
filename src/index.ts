@@ -29,8 +29,10 @@ export {
   chargeStructure,
   formate,
   valideJour,
+  validePeriode,
   valideStructure,
   verifieCoherenceJour,
+  verifieCoherencePeriode,
   verifieCoherenceStructure,
   type Gravite,
   type Probleme,
@@ -65,6 +67,27 @@ export {
   type EtatJour,
 } from './moteur/etatJour.ts';
 export { calculDisponibilite, indisponibilitesRecurrentes } from './moteur/disponibilite.ts';
+export {
+  comparerDates,
+  cleSemaineIso,
+  dateDansIntervalle,
+  dateSuivante,
+  estDateValide,
+} from './dates.ts';
+export {
+  auditeSemaine,
+  bilanDeSemaine,
+  type AuditSemaine,
+  type JourDeSemaine,
+} from './moteur/semaine.ts';
+export {
+  datesDeLaPeriode,
+  finDeLaPeriode,
+  jourDeLaPeriode,
+  reparePeriode,
+  type JourneeReparee,
+  type ReparationPeriode,
+} from './moteur/periode.ts';
 export {
   auditeJourNominal,
   jeunesImpactes,

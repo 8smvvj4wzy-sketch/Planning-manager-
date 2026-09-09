@@ -222,3 +222,40 @@ autorise — ce n'est pas un réglage d'affichage.
 Une seule fonction porte cette sémantique, `educateursSelonPorte`
 (`src/affectations.ts`) ; les cinq règles s'en servent. Cinq définitions concurrentes de
 la portée finiraient par diverger.
+
+## 7. La semaine, et l'absence qui dure
+
+Deux couches s'ajoutent au-dessus du solveur journalier, sans en réécrire une ligne.
+
+**La semaine n'est pas cinq journées mises bout à bout.** Les quotas hebdomadaires
+(`quota_detachement.maxPasParSemaine`) ne sont visibles que là : un éducateur peut
+respecter son plafond journalier tous les jours de la semaine et dépasser son plafond
+hebdomadaire. `auditeSemaine` (`src/moteur/semaine.ts`) audite chaque jour d'accueil de
+la grille puis passe les plannings obtenus à `evalueSemaine`, qui existait déjà.
+
+**Une absence qui dure se projette sur chaque date.** `FichierPeriode` borne les
+absences par des dates (`du` / `au`), et `reparePeriode` produit un planning par jour
+d'accueil de l'intervalle. Le fichier du jour reste l'unité atomique du moteur : la
+période le fabrique, elle ne le remplace pas.
+
+Quatre points qui ont demandé une décision :
+
+- **Le retour au fonctionnement initial se lit depuis la fin.** `retourNominal` est la
+  première date à partir de laquelle *toutes les suivantes* sont nominales, pas la
+  première journée calme rencontrée. Une accalmie au milieu d'une absence n'est pas un
+  retour à la normale, et l'annoncer comme tel serait un mensonge utile à personne.
+- **Une journée sans créneau est nominale.** Rien à faire veut bien dire rien à changer.
+  Conséquence à connaître : sur une grille dont certains jours sont vides, le retour à
+  la normale peut tomber sur un de ces jours — il est correct, mais il ne prouve rien
+  sur la reprise réelle.
+- **Une absence sans terme oblige à borner la période.** Sinon la série n'a pas de fin.
+  Le moteur lève plutôt que de produire un résultat arbitraire, et la validation le dit
+  avant (`periode.sans-fin`).
+- **Les quotas se comptent par semaine ISO.** Une période à cheval sur deux semaines a
+  deux plafonds distincts, pas un seul étalé sur dix jours. D'où `cleSemaineIso`
+  (`src/dates.ts`).
+
+**Toute l'arithmétique de dates est en UTC.** Construire un `Date` local et ajouter
+24 h se décale d'une heure au passage à l'heure d'hiver, et une série de journées finit
+par sauter ou répéter un jour. Les dates du modèle sont des jours calendaires, pas des
+instants — `src/dates.ts` ne fait rien d'autre que tenir cette distinction.

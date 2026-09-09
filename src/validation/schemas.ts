@@ -10,10 +10,13 @@
 
 import structure from '../../schemas/structure.schema.json' with { type: 'json' };
 import jour from '../../schemas/jour.schema.json' with { type: 'json' };
+import periode from '../../schemas/periode.schema.json' with { type: 'json' };
 
 export const schemaStructure: object = structure;
 export const schemaJour: object = jour;
+export const schemaPeriode: object = periode;
 
-export function schemaDe(nom: 'structure' | 'jour'): object {
-  return nom === 'structure' ? schemaStructure : schemaJour;
+export function schemaDe(nom: 'structure' | 'jour' | 'periode'): object {
+  if (nom === 'structure') return schemaStructure;
+  return nom === 'jour' ? schemaJour : schemaPeriode;
 }
