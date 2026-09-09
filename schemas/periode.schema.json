@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://planning-ime.local/schemas/periode.schema.json",
+  "title": "periode.json — Planning IME (non transmis)",
+  "description": "Une situation qui dure : absences bornées par des dates, et la série de journées qu'elles appellent.",
+  "type": "object",
+  "required": ["structureVersion", "du", "absences"],
+  "additionalProperties": false,
+  "properties": {
+    "structureVersion": { "type": "integer", "minimum": 1 },
+    "du": { "$ref": "#/$defs/dateIso" },
+    "au": { "$ref": "#/$defs/dateIso" },
+    "absences": { "type": "array", "items": { "$ref": "#/$defs/absencePeriode" } },
+    "renforts": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/identifiant" } },
+    "epingles": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/identifiant" } }
+  },
+  "$defs": {
+    "identifiant": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9_-]+$" },
+    "heure": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" },
+    "dateIso": { "type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$" },
+    "absencePeriode": {
+      "type": "object",
+      "required": ["type", "id", "du"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "enum": ["educateur", "jeune"] },
+        "id": { "$ref": "#/$defs/identifiant" },
+        "du": { "$ref": "#/$defs/dateIso" },
+        "au": { "$ref": "#/$defs/dateIso" },
+        "journee": { "type": "boolean" },
+        "debut": { "$ref": "#/$defs/heure" },
+        "fin": { "$ref": "#/$defs/heure" },
+        "motif": { "type": "string" }
+      },
+      "oneOf": [
+        {
+          "properties": { "journee": { "const": true } },
+          "not": { "anyOf": [{ "required": ["debut"] }, { "required": ["fin"] }] }
+        },
+        {
+          "required": ["debut", "fin"],
+          "not": { "required": ["journee"], "properties": { "journee": { "const": true } } }
+        }
+      ]
+    }
+  }
+}

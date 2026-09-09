@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Planning IME</title>
+    <meta name="description" content="Planning d'un IME : structure, règles d'affectation et réparation des journées" />
+
+    <!-- Thème clair/sombre ET couleur d'accent posés avant le premier rendu :
+         évite le flash d'un thème puis l'autre. Deux axes indépendants, deux
+         attributs, deux clés.
+
+         PRÉFIXE : `planning-ime:`. DatABA, DatABA Manager et cette
+         application partagent la même adresse github.io, donc le même
+         localStorage. Un clear global ici effacerait les données de
+         production des autres. Voir CLAUDE.md, piège « Collision de
+         stockage ». -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('planning-ime:theme');
+          if (t !== 'light' && t !== 'dark') {
+            t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+          document.documentElement.setAttribute('data-theme', t);
+          var a = localStorage.getItem('planning-ime:accent');
+          if (['rose', 'vert', 'jaune', 'rouge'].indexOf(a) >= 0) {
+            document.documentElement.setAttribute('data-accent', a);
+          }
+          document.addEventListener('DOMContentLoaded', function () {
+            var m = document.querySelector('meta[name="theme-color"]');
+            if (m) m.setAttribute('content', t === 'dark' ? '#0A1120' : '#F3F6FB');
+          });
+        } catch (e) {}
+      })();
+    </script>
+
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <meta name="theme-color" content="#F3F6FB" />
+    <link rel="icon" type="image/svg+xml" href="./icone.svg" />
+    <link rel="apple-touch-icon" href="./icone.svg" />
+    <meta name="apple-mobile-web-app-title" content="Planning IME" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./interface/main.jsx"></script>
+  </body>
+</html>

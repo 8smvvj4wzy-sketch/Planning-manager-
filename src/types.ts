@@ -142,6 +142,25 @@ export interface Activite {
 // 8. planningType
 // --------------------------------------------------------------------------
 
+/**
+ * Qui accompagne qui, a l'interieur d'un creneau.
+ *
+ * Un planning reel ne dit pas seulement « ces jeunes et ces educateurs sont
+ * ensemble » : il dit « Habib avec Agathe, Helena avec Sabrina ». Sans cette
+ * paire, `educateurs_autorises` ne peut verifier que la co-presence dans la
+ * salle, et `rotation_educateur` ne sait pas de quel educateur le jeune
+ * change.
+ *
+ * Le tableau est facultatif et partiel : une activite collective sans
+ * referent nomme n'en a pas, et un creneau peut n'en declarer que pour
+ * certains de ses jeunes. Un jeune peut avoir plusieurs accompagnants, et un
+ * educateur plusieurs jeunes.
+ */
+export interface Affectation {
+  jeuneId: string;
+  educateurId: string;
+}
+
 export interface CreneauType {
   id: string;
   jour: Jour;
@@ -152,6 +171,8 @@ export interface CreneauType {
   salleId?: string | null;
   jeunes: string[];
   educateurs: string[];
+  /** Binomes nommes. Chaque id doit figurer dans `jeunes` / `educateurs`. */
+  affectations?: Affectation[];
   /** Creneau intouchable meme en cas d'absence : le moteur contourne. */
   verrouille: boolean;
 }
@@ -173,6 +194,18 @@ export type TypeRegle =
   | 'continuite_journee'
   | 'presence_minimale'
   | 'indisponibilite_recurrente';
+
+/**
+ * Sur quoi se juge une regle qui met en rapport un jeune et un educateur.
+ *
+ * - `presence` : la personne est sur le creneau, point.
+ * - `binome`   : elle est nommee aupres de ce jeune (voir `Affectation`).
+ *
+ * Le defaut depend du type de regle et n'est pas arbitraire : une autorisation
+ * gagne en justesse des qu'on sait qui accompagne, une interdiction ne se
+ * relache pas parce que la donnee s'affine. Voir docs/decisions.md.
+ */
+export type PorteRegle = 'presence' | 'binome';
 
 export interface Cibles {
   jeunes?: string[];
@@ -223,6 +256,50 @@ export interface Absence {
   debut?: Heure;
   fin?: Heure;
   motif?: string;
+}
+
+/**
+ * Une absence qui court sur plusieurs jours.
+ *
+ * `du` / `au` bornent les JOURS ; `journee` ou `debut` / `fin` decoupent les
+ * HEURES a l'interieur de chacun. « Lucas absent du 14 au 19 » et « Lucas
+ * absent tous les apres-midis du 14 au 19 » s'ecrivent donc pareil, aux heures
+ * pres.
+ */
+export interface AbsencePeriode {
+  type: 'educateur' | 'jeune';
+  id: string;
+  /** Premier jour d'absence, inclus. */
+  du: DateIso;
+  /** Dernier jour d'absence, inclus. Absent = jusqu'a nouvel ordre. */
+  au?: DateIso;
+  journee?: boolean;
+  debut?: Heure;
+  fin?: Heure;
+  motif?: string;
+}
+
+/**
+ * Une situation qui dure, et les plannings qu'elle appelle.
+ *
+ * Le fichier du jour reste l'unite atomique du moteur : la periode se projette
+ * sur chaque date d'accueil et produit un `FichierJour`. Rien du solveur n'est
+ * reecrit pour autant.
+ */
+export interface FichierPeriode {
+  structureVersion: number;
+  /** Premier jour examine. */
+  du: DateIso;
+  /**
+   * Dernier jour examine. Deduit de la derniere fin d'absence quand il est
+   * absent — et alors OBLIGATOIRE si une absence court sans terme, sans quoi la
+   * serie n'aurait pas de fin.
+   */
+  au?: DateIso;
+  absences: AbsencePeriode[];
+  /** Renforts mobilisables sur toute la periode. */
+  renforts?: string[];
+  epingles?: string[];
 }
 
 export interface FichierJour {

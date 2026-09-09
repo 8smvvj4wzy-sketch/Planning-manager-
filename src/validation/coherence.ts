@@ -6,9 +6,11 @@
 
 import { Referentiel } from '../referentiel.ts';
 import { evaluateurDe, typesConnus } from '../regles/registre.ts';
+import { comparerDates } from '../dates.ts';
+import { finDeLaPeriode } from '../moteur/periode.ts';
 import { jourDeLaDate } from '../moteur/etatJour.ts';
 import { heureEnMinutes } from '../temps.ts';
-import type { FichierJour, Structure } from '../types.ts';
+import type { FichierJour, FichierPeriode, Structure } from '../types.ts';
 import { avertissement, erreur, type Probleme } from './resultat.ts';
 
 function doublons(ids: readonly string[]): string[] {
@@ -220,7 +222,68 @@ function verifiePlanningType(ref: Referentiel): Probleme[] {
     });
   });
 
-  return [...problemes, ...verifieChevauchements(ref)];
+  return [...problemes, ...verifieAffectations(ref), ...verifieChevauchements(ref)];
+}
+
+/**
+ * Les binomes doivent porter sur des gens qui sont effectivement sur le
+ * creneau : une paire qui nomme quelqu'un d'absent des listes ferait croire au
+ * moteur qu'un jeune a un referent qui n'est pas la.
+ */
+function verifieAffectations(ref: Referentiel): Probleme[] {
+  const problemes: Probleme[] = [];
+
+  ref.structure.planningType.forEach((creneau, i) => {
+    const affectations = creneau.affectations ?? [];
+    if (affectations.length === 0) return;
+    const base = `/planningType/${i}/affectations`;
+    const vues = new Set<string>();
+
+    affectations.forEach((a, k) => {
+      if (!creneau.jeunes.includes(a.jeuneId)) {
+        problemes.push(
+          erreur(
+            'creneau.affectation',
+            `${base}/${k}/jeuneId`,
+            `${ref.libelleJeune(a.jeuneId)} est nomme dans un binome mais absent des jeunes du creneau`,
+          ),
+        );
+      }
+      if (!creneau.educateurs.includes(a.educateurId)) {
+        problemes.push(
+          erreur(
+            'creneau.affectation',
+            `${base}/${k}/educateurId`,
+            `${ref.libelleEducateur(a.educateurId)} est nomme dans un binome mais absent des educateurs du creneau`,
+          ),
+        );
+      }
+      const cle = `${a.jeuneId}\u0000${a.educateurId}`;
+      if (vues.has(cle)) {
+        problemes.push(erreur('creneau.affectation', `${base}/${k}`, 'binome en double'));
+      }
+      vues.add(cle);
+    });
+
+    // Licite — un creneau peut ne nommer que certaines paires — mais ca se
+    // signale : c'est souvent un oubli de saisie, et le moteur bascule alors
+    // sur le repli pour ces jeunes-la sans que personne ne l'ait voulu.
+    const nommes = new Set(affectations.map((a) => a.jeuneId));
+    const orphelins = creneau.jeunes.filter((id) => !nommes.has(id));
+    if (orphelins.length > 0) {
+      problemes.push(
+        avertissement(
+          'creneau.sans-referent',
+          `/planningType/${i}`,
+          `ce creneau nomme ses binomes mais laisse sans referent : ${orphelins
+            .map((id) => ref.libelleJeune(id))
+            .join(', ')}`,
+        ),
+      );
+    }
+  });
+
+  return problemes;
 }
 
 /** Un jeune, un educateur ou une salle ne peuvent pas etre a deux endroits a la fois. */
@@ -366,6 +429,88 @@ export function verifieCoherenceJour(ref: Referentiel, fichier: FichierJour): Pr
     } else if (educateur.statut !== 'renfort') {
       problemes.push(
         avertissement('renfort.statut', `/renfortsDuJour/${i}`, `${ref.libelleEducateur(id)} n'a pas le statut "renfort"`),
+      );
+    }
+  });
+
+  (fichier.epingles ?? []).forEach((id, i) => {
+    if (!ref.creneauxType.has(id)) {
+      problemes.push(erreur('reference', `/epingles/${i}`, `creneau inconnu dans le planning type : "${id}"`));
+    }
+  });
+
+  return problemes;
+}
+
+/** Coherence d'un `periode.json` face a la structure sur laquelle il est construit. */
+export function verifieCoherencePeriode(ref: Referentiel, fichier: FichierPeriode): Probleme[] {
+  const problemes: Probleme[] = [];
+
+  if (fichier.structureVersion !== ref.structure.meta.version) {
+    problemes.push(
+      erreur(
+        'periode.version',
+        '/structureVersion',
+        `construite sur la structure v${fichier.structureVersion}, or la structure chargee est en v${ref.structure.meta.version}`,
+      ),
+    );
+  }
+
+  if (fichier.au && comparerDates(fichier.au, fichier.du) < 0) {
+    problemes.push(erreur('periode.intervalle', '/au', `${fichier.au} precede ${fichier.du}`));
+  }
+
+  // Une absence sans terme sur une periode sans terme n'a pas de fin : le
+  // moteur leve plutot que de produire une serie infinie, autant le dire ici.
+  try {
+    finDeLaPeriode(fichier);
+  } catch (e) {
+    problemes.push(erreur('periode.sans-fin', '/au', e instanceof Error ? e.message : String(e)));
+  }
+
+  fichier.absences.forEach((absence, i) => {
+    const table = absence.type === 'jeune' ? ref.jeunes : ref.educateurs;
+    if (!table.has(absence.id)) {
+      problemes.push(erreur('reference', `/absences/${i}/id`, `${absence.type} inconnu : "${absence.id}"`));
+    }
+    if (absence.au && comparerDates(absence.au, absence.du) < 0) {
+      problemes.push(
+        erreur('absence.intervalle', `/absences/${i}/au`, `${absence.au} precede ${absence.du}`),
+      );
+    }
+    if (absence.debut && absence.fin && heureEnMinutes(absence.fin) <= heureEnMinutes(absence.debut)) {
+      problemes.push(erreur('absence.plage', `/absences/${i}`, 'fin anterieure ou egale au debut'));
+    }
+    // Une absence entierement hors de la periode ne produit rien : c'est licite
+    // mais c'est presque toujours une date mal saisie.
+    const fin = fichier.au;
+    if (fin && comparerDates(absence.du, fin) > 0) {
+      problemes.push(
+        avertissement(
+          'absence.hors-periode',
+          `/absences/${i}`,
+          `commence le ${absence.du}, apres la fin de la periode (${fin}) : sans effet`,
+        ),
+      );
+    }
+    if (absence.au && comparerDates(absence.au, fichier.du) < 0) {
+      problemes.push(
+        avertissement(
+          'absence.hors-periode',
+          `/absences/${i}`,
+          `se termine le ${absence.au}, avant le debut de la periode (${fichier.du}) : sans effet`,
+        ),
+      );
+    }
+  });
+
+  (fichier.renforts ?? []).forEach((id, i) => {
+    const educateur = ref.educateur(id);
+    if (!educateur) {
+      problemes.push(erreur('reference', `/renforts/${i}`, `educateur inconnu : "${id}"`));
+    } else if (educateur.statut !== 'renfort') {
+      problemes.push(
+        avertissement('renfort.statut', `/renforts/${i}`, `${ref.libelleEducateur(id)} n'a pas le statut "renfort"`),
       );
     }
   });

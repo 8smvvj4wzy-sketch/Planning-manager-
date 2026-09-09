@@ -29,8 +29,10 @@ export {
   chargeStructure,
   formate,
   valideJour,
+  validePeriode,
   valideStructure,
   verifieCoherenceJour,
+  verifieCoherencePeriode,
   verifieCoherenceStructure,
   type Gravite,
   type Probleme,
@@ -66,6 +68,29 @@ export {
 } from './moteur/etatJour.ts';
 export { calculDisponibilite, indisponibilitesRecurrentes } from './moteur/disponibilite.ts';
 export {
+  comparerDates,
+  cleSemaineIso,
+  dateDansIntervalle,
+  dateSuivante,
+  estDateValide,
+} from './dates.ts';
+export {
+  auditeSemaine,
+  bilanDeSemaine,
+  type AuditSemaine,
+  type JourDeSemaine,
+} from './moteur/semaine.ts';
+export {
+  datesDeLaPeriode,
+  finDeLaPeriode,
+  jourDeLaPeriode,
+  comparePeriodes,
+  reparePeriode,
+  type DifferenceJournee,
+  type JourneeReparee,
+  type ReparationPeriode,
+} from './moteur/periode.ts';
+export {
   auditeJourNominal,
   jeunesImpactes,
   repare,
@@ -76,5 +101,53 @@ export {
 } from './moteur/reparation.ts';
 
 export { educateursRequis, jeunesPresentsDu, ratioApplicable } from './encadrement.ts';
+export {
+  declareDesBinomes,
+  educateursAupresDe,
+  educateursSelonPorte,
+  estNominatif,
+  jeunesSansReferent,
+  jeunesSelonPorte,
+  rattacheAuxJeunesSansReferent,
+  remplaceEducateurDansBinomes,
+  retireDesBinomes,
+  retireEducateurDesBinomes,
+} from './affectations.ts';
 export { estDetacheSur, groupesDeReference } from './detachement.ts';
 export { educateursLibres, jeunesSansAffectation, sallesLibres } from './vues.ts';
+
+export {
+  analyseCellule,
+  decoupeTableau,
+  devineSeparateur,
+  litPlanning,
+  nomsRencontres,
+  normaliseHeure,
+  pasDesBornes,
+  trouveColonneHeures,
+  type BinomeLu,
+  type CelluleLue,
+  type CreneauLu,
+  type PlanningLu,
+} from './import/tableur.ts';
+export { idUnique, normaliseNom, slugifie } from './import/identifiants.ts';
+export {
+  proposeCorrespondances,
+  type CibleCorrespondance,
+  type Correspondance,
+} from './import/correspondance.ts';
+export {
+  assemble,
+  type MetaDepart,
+  type OptionsAssemblage,
+  type ResultatAssemblage,
+} from './import/assemblage.ts';
+
+export {
+  ErreurDechiffrement,
+  FORMAT_CHIFFRE,
+  chiffre,
+  dechiffre,
+  estEnveloppeChiffree,
+  type EnveloppeChiffree,
+} from './transport/chiffrement.ts';

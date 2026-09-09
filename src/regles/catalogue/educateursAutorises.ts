@@ -3,17 +3,25 @@
  *
  * params :
  *   - `educateurs` : liste blanche (obligatoire)
- *   - `mode` : "exclusif" (defaut) = tout educateur du creneau doit figurer dans
- *              la liste ; "au-moins-un" = il suffit qu'un educateur de la liste
- *              soit present sur le creneau.
+ *   - `mode` : "exclusif" (defaut) = tout educateur aupres du jeune doit figurer
+ *              dans la liste ; "au-moins-un" = il suffit que l'un d'eux y soit.
+ *   - `porte` : "binome" (defaut) = on ne regarde que les educateurs nommes
+ *               aupres du jeune ; "presence" = tous ceux du creneau.
+ *
+ * Le defaut `binome` est deliberé : une autorisation gagne en justesse des
+ * qu'on sait qui accompagne. En `presence`, « L.M. uniquement avec Marie ou
+ * Karim » lui interdit toute activite collective a trois adultes.
  */
 
 import type { Regle } from '../../types.ts';
 import type { Referentiel } from '../../referentiel.ts';
 import type { Probleme } from '../../validation/resultat.ts';
+import { educateursSelonPorte } from '../../affectations.ts';
 import {
   chemin,
   exigeCibles,
+  exigePorteValide,
+  litPorte,
   exigeReferences,
   faitViolation,
   litListe,
@@ -38,6 +46,7 @@ export const educateursAutorises: EvaluateurRegle = {
     }
     problemes.push(...exigeReferences(regle, ref, educateurs, 'educateurs', '/params/educateurs'));
     problemes.push(...exigeReferences(regle, ref, regle.cibles.jeunes ?? [], 'jeunes', '/cibles/jeunes'));
+    problemes.push(...exigePorteValide(regle, ref));
     const mode = litTexte(regle, 'mode');
     if (mode && mode !== 'exclusif' && mode !== 'au-moins-un') {
       problemes.push(
@@ -50,12 +59,14 @@ export const educateursAutorises: EvaluateurRegle = {
   evalue(regle: Regle, ctx: ContexteEvaluation): Violation[] {
     const autorises = new Set(litListe(regle, 'educateurs'));
     const exclusif = (litTexte(regle, 'mode') ?? 'exclusif') === 'exclusif';
+    const porte = litPorte(regle, 'binome');
     const violations: Violation[] = [];
 
     for (const jeuneId of regle.cibles.jeunes ?? []) {
       for (const creneau of ctx.planning.creneauxDeJeune(jeuneId)) {
+        const aupres = educateursSelonPorte(creneau, jeuneId, porte);
         if (exclusif) {
-          const intrus = creneau.educateurs.filter((e) => !autorises.has(e));
+          const intrus = aupres.filter((e) => !autorises.has(e));
           if (intrus.length > 0) {
             violations.push(
               faitViolation(
@@ -69,13 +80,13 @@ export const educateursAutorises: EvaluateurRegle = {
               ),
             );
           }
-        } else if (creneau.educateurs.length > 0 && !creneau.educateurs.some((e) => autorises.has(e))) {
+        } else if (aupres.length > 0 && !aupres.some((e) => autorises.has(e))) {
           violations.push(
             faitViolation(
               regle,
               ctx.options,
               `aucun educateur autorise aupres de ${ctx.ref.libelleJeune(jeuneId)}`,
-              { creneaux: [creneau.id], jeunes: [jeuneId], educateurs: [...creneau.educateurs] },
+              { creneaux: [creneau.id], jeunes: [jeuneId], educateurs: aupres },
             ),
           );
         }

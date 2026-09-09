@@ -4,7 +4,13 @@
  * params :
  *   - `tousLesPas` : duree maximale d'une sequence continue avec le meme educateur ;
  *   - `fenetre` (optionnel) : sur toute fenetre glissante de N pas de presence,
- *     au moins deux educateurs differents doivent s'etre succede.
+ *     au moins deux educateurs differents doivent s'etre succede ;
+ *   - `porte` : "binome" (defaut) = on suit l'accompagnant nomme ; "presence" =
+ *     tous les educateurs du creneau.
+ *
+ * Defaut `binome` : la rotation porte sur qui accompagne le jeune, pas sur qui
+ * passe dans la salle. Le couloir « protocole » d'un planning reel — un jeune,
+ * une educatrice qui tourne — ne se lit pas autrement.
  *
  * Souple par defaut : le cout croit avec le depassement.
  */
@@ -12,9 +18,13 @@
 import type { Regle } from '../../types.ts';
 import type { Referentiel } from '../../referentiel.ts';
 import type { Probleme } from '../../validation/resultat.ts';
+import { educateursSelonPorte } from '../../affectations.ts';
+import type { PorteRegle } from '../../types.ts';
 import {
   exigeCibles,
   exigeNombre,
+  exigePorteValide,
+  litPorte,
   exigeReferences,
   faitViolation,
   litNombre,
@@ -23,11 +33,11 @@ import {
   type Violation,
 } from '../base.ts';
 
-/** Educateurs presents aupres du jeune, pas par pas. */
-function sequence(ctx: ContexteEvaluation, jeuneId: string): (readonly string[] | null)[] {
+/** Educateurs aupres du jeune, pas par pas. `null` = le jeune n'est nulle part. */
+function sequence(ctx: ContexteEvaluation, jeuneId: string, porte: PorteRegle): (readonly string[] | null)[] {
   return ctx.ref.grille.tousLesPas().map((p) => {
     const creneau = ctx.planning.jeuneOccupeAuPas(jeuneId, p);
-    return creneau ? creneau.educateurs : null;
+    return creneau ? educateursSelonPorte(creneau, jeuneId, porte) : null;
   });
 }
 
@@ -40,17 +50,19 @@ export const rotationEducateur: EvaluateurRegle = {
       ...exigeCibles(regle, ref, 'jeunes'),
       ...exigeNombre(regle, ref, 'tousLesPas'),
       ...exigeReferences(regle, ref, regle.cibles.jeunes ?? [], 'jeunes', '/cibles/jeunes'),
+      ...exigePorteValide(regle, ref),
     ];
   },
 
   evalue(regle: Regle, ctx: ContexteEvaluation): Violation[] {
     const maximum = litNombre(regle, 'tousLesPas') ?? 0;
     const fenetre = litNombre(regle, 'fenetre');
+    const porte = litPorte(regle, 'binome');
     if (maximum <= 0) return [];
     const violations: Violation[] = [];
 
     for (const jeuneId of regle.cibles.jeunes ?? []) {
-      const suite = sequence(ctx, jeuneId);
+      const suite = sequence(ctx, jeuneId, porte);
 
       // 1. sequences continues avec le meme educateur
       const compteurs = new Map<string, number>();

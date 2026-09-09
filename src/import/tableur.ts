@@ -1,0 +1,383 @@
+/**
+ * Lecture d'un planning saisi dans un tableur.
+ *
+ * Ce module ne fait que DECOUPER et LIRE : il ne fabrique pas de structure.
+ * Il rend ce qu'il a compris, avec les noms tels qu'ils sont ecrits, et c'est
+ * l'ecran de correspondance qui tranche ensuite qui est jeune et qui est
+ * educateur. Un CSV ne dit pas `e1`, il dit un prenom.
+ *
+ * Forme reconnue, celle d'un planning d'IME reel :
+ *
+ *   |        | Vendredi                            |                |
+ *   | 9h30   | Accueil :                           | Protocole :    |
+ *   |        | Habib / Agathe                      | Adiyan / Camille|
+ *   |        | Helena / Sabrina                    |                |
+ *   | 10h30  | Mand :                              |                |
+ *   |        | Valentin / Simon                    |                |
+ *
+ * Trois proprietes de cette forme commandent tout le reste :
+ *  - la premiere colonne porte les heures ;
+ *  - les colonnes suivantes sont des COULOIRS d'activites simultanees, sans
+ *    identite fixe : un jeune peut decrocher du collectif pour une activite a
+ *    lui, sur une duree qui n'est pas celle des autres ;
+ *  - une cellule fusionnee sur plusieurs lignes ressort VIDE a l'export : un
+ *    creneau court donc de sa ligne jusqu'a la prochaine cellule non vide de
+ *    la meme colonne.
+ */
+
+/* ==================== Decoupage ==================== */
+
+/**
+ * Devine le separateur. On compte les occurrences hors guillemets sur les
+ * premieres lignes plutot que sur la premiere seule : une ligne de titre
+ * fusionnee n'a souvent qu'un separateur, ce qui suffit a faire mentir le
+ * comptage.
+ */
+export function devineSeparateur(texte: string): string {
+  const candidats = ['\t', ';', ','];
+  const echantillon = texte.slice(0, 20_000);
+  let meilleur = ',';
+  let record = -1;
+
+  for (const separateur of candidats) {
+    let compte = 0;
+    let dansGuillemets = false;
+    for (let i = 0; i < echantillon.length; i++) {
+      const c = echantillon[i];
+      if (c === '"') dansGuillemets = !dansGuillemets;
+      else if (c === separateur && !dansGuillemets) compte++;
+    }
+    if (compte > record) {
+      record = compte;
+      meilleur = separateur;
+    }
+  }
+  return meilleur;
+}
+
+/**
+ * CSV/TSV vers tableau de cellules.
+ *
+ * Gere le BOM, les guillemets, les guillemets doubles a l'interieur d'un champ,
+ * et surtout les SAUTS DE LIGNE DANS UNE CELLULE — c'est le cas de toutes les
+ * cellules de ce planning, qui empilent leurs binomes.
+ */
+export function decoupeTableau(texte: string, separateur = devineSeparateur(texte)): string[][] {
+  const source = texte.replace(/^﻿/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lignes: string[][] = [];
+  let ligne: string[] = [];
+  let cellule = '';
+  let dansGuillemets = false;
+
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i]!;
+
+    if (dansGuillemets) {
+      if (c === '"') {
+        if (source[i + 1] === '"') {
+          cellule += '"';
+          i++;
+        } else dansGuillemets = false;
+      } else cellule += c;
+      continue;
+    }
+
+    if (c === '"') dansGuillemets = true;
+    else if (c === separateur) {
+      ligne.push(cellule);
+      cellule = '';
+    } else if (c === '\n') {
+      ligne.push(cellule);
+      lignes.push(ligne);
+      ligne = [];
+      cellule = '';
+    } else cellule += c;
+  }
+
+  ligne.push(cellule);
+  lignes.push(ligne);
+
+  // Une derniere ligne vide vient du saut final : elle ne porte rien.
+  while (lignes.length > 0 && lignes[lignes.length - 1]!.every((c) => c.trim() === '')) lignes.pop();
+  return lignes;
+}
+
+/* ==================== Heures ==================== */
+
+const HEURE = /^\s*(\d{1,2})\s*[h:]\s*(\d{2})?\s*$/;
+
+/** « 9h30 », « 9h », « 09:30 » → « 09:30 ». `null` si ce n'est pas une heure. */
+export function normaliseHeure(texte: string): string | null {
+  const m = HEURE.exec(texte);
+  if (!m) return null;
+  const heures = Number(m[1]);
+  const minutes = m[2] ? Number(m[2]) : 0;
+  if (heures > 23 || minutes > 59) return null;
+  return `${String(heures).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+}
+
+/**
+ * Colonne des heures : celle qui en contient le plus, a condition d'en avoir au
+ * moins deux. On ne suppose pas que c'est la premiere — un export peut trainer
+ * une colonne de numeros de ligne devant.
+ */
+export function trouveColonneHeures(table: readonly (readonly string[])[]): number {
+  let meilleure = -1;
+  let record = 1;
+  const largeur = Math.max(0, ...table.map((l) => l.length));
+
+  for (let col = 0; col < largeur; col++) {
+    const compte = table.reduce(
+      (total, ligne) => total + (normaliseHeure(ligne[col] ?? '') !== null ? 1 : 0),
+      0,
+    );
+    if (compte > record) {
+      record = compte;
+      meilleure = col;
+    }
+  }
+  return meilleure;
+}
+
+function pgcd(a: number, b: number): number {
+  return b === 0 ? Math.abs(a) : pgcd(b, a % b);
+}
+
+function enMinutes(heure: string): number {
+  const [h, m] = heure.split(':').map(Number);
+  return (h ?? 0) * 60 + (m ?? 0);
+}
+
+/**
+ * Le pas de la grille : le plus grand qui tombe juste sur toutes les bornes
+ * relevees. La specification supposait 30 minutes ; un planning reel descend a
+ * 5 des qu'il porte un « 11h15 » et un « 12h10 ».
+ */
+export function pasDesBornes(bornes: readonly string[]): number {
+  if (bornes.length < 2) return 30;
+  const origine = enMinutes(bornes[0]!);
+  const ecarts = bornes.slice(1).map((b) => enMinutes(b) - origine);
+  return Math.max(1, ecarts.reduce((acc, e) => pgcd(acc, e), 0));
+}
+
+/* ==================== Contenu d'une cellule ==================== */
+
+export interface BinomeLu {
+  jeune: string;
+  /** Un jeune peut avoir plusieurs accompagnants : « Valentin / Angie + Simon ». */
+  educateurs: string[];
+}
+
+export interface CelluleLue {
+  /** Ce qui precede les deux-points, ou la cellule entiere si elle n'en a pas. */
+  activite: string;
+  binomes: BinomeLu[];
+  /** Lignes qu'on n'a pas su lire comme un binome : « Angie (pas dispo) ». */
+  restes: string[];
+}
+
+function nettoie(texte: string): string {
+  return texte.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * « Mand :\nValentin / Simon\nHabib / Agathe » →
+ *   activite « Mand », binomes [Valentin/Simon, Habib/Agathe].
+ *
+ * L'ordre `Jeune / Educateur` est celui du planning d'origine ; il est pose ici
+ * et l'ecran de correspondance permet de le corriger si un fichier fait
+ * l'inverse.
+ */
+export function analyseCellule(brut: string): CelluleLue | null {
+  const lignes = brut
+    .split('\n')
+    .map(nettoie)
+    .filter((l) => l !== '');
+  if (lignes.length === 0) return null;
+
+  let activite = '';
+  const binomes: BinomeLu[] = [];
+  const restes: string[] = [];
+
+  lignes.forEach((ligne, index) => {
+    let contenu = ligne;
+
+    // Les deux-points de la premiere ligne portent le nom de l'activite. La
+    // suite de cette meme ligne peut deja etre un binome : « Protocole :
+    // Adiyan / Camille » tient sur une seule ligne.
+    if (index === 0) {
+      const coupe = ligne.indexOf(':');
+      if (coupe >= 0) {
+        activite = nettoie(ligne.slice(0, coupe));
+        contenu = nettoie(ligne.slice(coupe + 1));
+      } else {
+        activite = ligne;
+        contenu = '';
+      }
+    }
+
+    if (contenu === '') return;
+
+    const parts = contenu.split('/');
+    if (parts.length < 2) {
+      restes.push(contenu);
+      return;
+    }
+
+    const jeune = nettoie(parts[0]!);
+    const educateurs = parts
+      .slice(1)
+      .join('/')
+      .split('+')
+      .map(nettoie)
+      .filter((e) => e !== '');
+
+    if (jeune === '' || educateurs.length === 0) restes.push(contenu);
+    else binomes.push({ jeune, educateurs });
+  });
+
+  return { activite, binomes, restes };
+}
+
+/* ==================== Lecture d'un tableau entier ==================== */
+
+export interface CreneauLu {
+  /** Index de colonne dans le tableau d'origine — un couloir, sans autre sens. */
+  couloir: number;
+  debut: string;
+  /** Heure de fin, deduite de la prochaine cellule non vide du meme couloir. */
+  fin: string;
+  activite: string;
+  binomes: BinomeLu[];
+  restes: string[];
+}
+
+export interface PlanningLu {
+  /** Bornes horaires relevees, dans l'ordre. */
+  bornes: string[];
+  pasMinutes: number;
+  debut: string;
+  fin: string;
+  creneaux: CreneauLu[];
+  /** Titre de la premiere ligne, souvent le jour — a confirmer par l'utilisateur. */
+  titre: string | null;
+  /** Ce que la lecture a du supposer, et qui merite d'etre relu. */
+  remarques: string[];
+}
+
+/**
+ * Lit un tableau decoupe.
+ *
+ * La duree du dernier creneau de chaque couloir n'est pas dans le fichier : la
+ * derniere ligne n'a pas de ligne suivante pour la borner. On la clot a la fin
+ * de la journee, et on le dit dans `remarques` plutot que de le taire.
+ */
+export function litPlanning(table: readonly (readonly string[])[]): PlanningLu {
+  const remarques: string[] = [];
+  const colonneHeures = trouveColonneHeures(table);
+  if (colonneHeures < 0) {
+    throw new Error(
+      "Aucune colonne d'heures trouvee : le tableau doit en porter une (« 9h30 », « 10h », « 09:30 »).",
+    );
+  }
+
+  // Les lignes qui portent une heure, et leur position dans le tableau.
+  const rangees: { ligne: number; heure: string }[] = [];
+  table.forEach((ligne, i) => {
+    const heure = normaliseHeure(ligne[colonneHeures] ?? '');
+    if (heure !== null) rangees.push({ ligne: i, heure });
+  });
+
+  if (rangees.length < 2) {
+    throw new Error('Il faut au moins deux bornes horaires pour deduire une grille.');
+  }
+
+  const bornes = rangees.map((r) => r.heure);
+  const pasMinutes = pasDesBornes(bornes);
+  const debut = bornes[0]!;
+
+  // La derniere borne clot la journee : rien ne dit ce qui se passe apres.
+  const fin = bornes[bornes.length - 1]!;
+  remarques.push(
+    `La journee est close a ${fin}, derniere heure du tableau : le fichier ne dit pas ` +
+      'combien de temps dure le dernier creneau.',
+  );
+  if (pasMinutes !== 30) {
+    remarques.push(
+      `Pas de grille deduit : ${pasMinutes} minutes (et non 30). Toute regle exprimee en pas ` +
+        "change d'echelle avec lui.",
+    );
+  }
+
+  const titre = premiereLigneTitre(table, colonneHeures);
+  const largeur = Math.max(0, ...table.map((l) => l.length));
+  const creneaux: CreneauLu[] = [];
+
+  for (let col = 0; col < largeur; col++) {
+    if (col === colonneHeures) continue;
+
+    for (let r = 0; r < rangees.length; r++) {
+      const brut = table[rangees[r]!.ligne]?.[col] ?? '';
+      const cellule = analyseCellule(brut);
+      if (!cellule) continue;
+
+      // Cellule fusionnee : elle court jusqu'a la prochaine rangee dont la
+      // cellule de ce couloir est non vide, ou jusqu'a la fin de la journee.
+      let suivante = r + 1;
+      while (suivante < rangees.length && (table[rangees[suivante]!.ligne]?.[col] ?? '').trim() === '') {
+        suivante++;
+      }
+
+      creneaux.push({
+        couloir: col,
+        debut: rangees[r]!.heure,
+        fin: suivante < rangees.length ? rangees[suivante]!.heure : fin,
+        activite: cellule.activite,
+        binomes: cellule.binomes,
+        restes: cellule.restes,
+      });
+    }
+  }
+
+  // Un creneau qui commence et finit a la meme heure ne dure rien : il vient
+  // d'une cellule posee sur la derniere ligne du tableau.
+  const vides = creneaux.filter((c) => c.debut === c.fin);
+  if (vides.length > 0) {
+    remarques.push(
+      `${vides.length} cellule(s) sur la derniere ligne n'ont pas de duree : elles sont ignorees.`,
+    );
+  }
+
+  return {
+    bornes,
+    pasMinutes,
+    debut,
+    fin,
+    creneaux: creneaux.filter((c) => c.debut !== c.fin),
+    titre,
+    remarques,
+  };
+}
+
+/** Titre de la premiere ligne, hors colonne des heures : souvent le jour. */
+function premiereLigneTitre(table: readonly (readonly string[])[], colonneHeures: number): string | null {
+  for (const ligne of table) {
+    if (normaliseHeure(ligne[colonneHeures] ?? '') !== null) break;
+    const cellules = ligne.filter((c, i) => i !== colonneHeures && nettoie(c) !== '');
+    if (cellules.length > 0) return nettoie(cellules[0]!);
+  }
+  return null;
+}
+
+/** Tous les noms rencontres, dans l'ordre d'apparition, sans doublon. */
+export function nomsRencontres(planning: PlanningLu): { jeunes: string[]; educateurs: string[] } {
+  const jeunes: string[] = [];
+  const educateurs: string[] = [];
+  for (const creneau of planning.creneaux) {
+    for (const binome of creneau.binomes) {
+      if (!jeunes.includes(binome.jeune)) jeunes.push(binome.jeune);
+      for (const e of binome.educateurs) if (!educateurs.includes(e)) educateurs.push(e);
+    }
+  }
+  return { jeunes, educateurs };
+}

@@ -5,13 +5,21 @@
  */
 
 import { Referentiel } from '../referentiel.ts';
-import type { FichierJour, Structure } from '../types.ts';
-import { verifieCoherenceJour, verifieCoherenceStructure } from './coherence.ts';
-import { valideFormeJour, valideFormeStructure } from './schema.ts';
+import type { FichierJour, FichierPeriode, Structure } from '../types.ts';
+import {
+  verifieCoherenceJour,
+  verifieCoherencePeriode,
+  verifieCoherenceStructure,
+} from './coherence.ts';
+import { valideFormeJour, valideFormePeriode, valideFormeStructure } from './schema.ts';
 import { agrege, type Resultat } from './resultat.ts';
 
 export { formate, type Gravite, type Probleme, type Resultat } from './resultat.ts';
-export { verifieCoherenceJour, verifieCoherenceStructure } from './coherence.ts';
+export {
+  verifieCoherenceJour,
+  verifieCoherencePeriode,
+  verifieCoherenceStructure,
+} from './coherence.ts';
 
 /** Valide un `structure.json` fraichement lu (forme + coherence). */
 export function valideStructure(donnees: unknown): Resultat {
@@ -25,6 +33,13 @@ export function valideJour(ref: Referentiel, donnees: unknown): Resultat {
   const forme = valideFormeJour(donnees);
   if (forme.length > 0) return agrege(forme);
   return agrege(verifieCoherenceJour(ref, donnees as FichierJour));
+}
+
+/** Valide un `periode.json` face a une structure deja chargee. */
+export function validePeriode(ref: Referentiel, donnees: unknown): Resultat {
+  const forme = valideFormePeriode(donnees);
+  if (forme.length > 0) return agrege(forme);
+  return agrege(verifieCoherencePeriode(ref, donnees as FichierPeriode));
 }
 
 /**

@@ -5,22 +5,24 @@
  */
 
 import { Ajv2020, type ErrorObject, type ValidateFunction } from 'ajv/dist/2020.js';
-import { lireSchema } from '../chemins.ts';
+import { schemaJour, schemaPeriode, schemaStructure } from './schemas.ts';
 import { erreur, type Probleme } from './resultat.ts';
 
 let ajv: Ajv2020 | null = null;
 let valideStructure: ValidateFunction | null = null;
 let valideJour: ValidateFunction | null = null;
+let validePeriode: ValidateFunction | null = null;
 
 function instance(): Ajv2020 {
   if (ajv) return ajv;
   ajv = new Ajv2020({ allErrors: true, strict: false, allowUnionTypes: true });
-  ajv.addSchema(lireSchema('structure') as object);
-  ajv.addSchema(lireSchema('jour') as object);
+  ajv.addSchema(schemaStructure);
+  ajv.addSchema(schemaJour);
+  ajv.addSchema(schemaPeriode);
   return ajv;
 }
 
-function compile(nom: 'structure' | 'jour'): ValidateFunction {
+function compile(nom: 'structure' | 'jour' | 'periode'): ValidateFunction {
   const a = instance();
   const id = `https://planning-ime.local/schemas/${nom}.schema.json`;
   const fn = a.getSchema(id);
@@ -51,4 +53,10 @@ export function valideFormeStructure(donnees: unknown): Probleme[] {
 export function valideFormeJour(donnees: unknown): Probleme[] {
   valideJour ??= compile('jour');
   return valideJour(donnees) ? [] : traduit(valideJour.errors);
+}
+
+/** Valide la forme d'un `periode.json` brut. */
+export function valideFormePeriode(donnees: unknown): Probleme[] {
+  validePeriode ??= compile('periode');
+  return validePeriode(donnees) ? [] : traduit(validePeriode.errors);
 }

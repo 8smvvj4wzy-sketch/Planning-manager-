@@ -155,3 +155,207 @@ Il faut le savoir avant de s'appuyer dessus :
   explicable — chaque changement porte son motif. Il n'est pas garanti optimal.
 - **Il ne répare qu'une journée à la fois.** Les quotas hebdomadaires se
   vérifient après coup, ils ne guident pas la recherche.
+
+---
+
+# Ce que le planning réel a corrigé
+
+Les décisions ci-dessus ont été prises sur la spécification seule. La lecture d'un
+planning d'établissement réel en a démenti une et en a rendu une autre indispensable.
+
+## 4. Le pas de 30 minutes ne tient pas
+
+Les bornes horaires réelles ne sont pas régulières : 9h30, 10h, 10h30, 11h, **11h15**,
+12h, **12h10**, 13h10, **13h30**, 14h30, 15h, 15h30. Le plus grand pas qui tombe juste
+sur toutes ces bornes est **5 minutes**.
+
+`pasMinutes` étant déjà un paramètre du fichier et le schéma acceptant 5, il n'y a rien
+à recoder. Mais la conséquence doit être écrite noir sur blanc, parce qu'elle est
+silencieuse : **toute règle exprimée en pas change d'échelle avec le pas.** Avec
+`pasMinutes: 5`, `tousLesPas: 2` veut dire dix minutes, `maxPasParJour: 4` vingt
+minutes, et une activité d'une heure fait `dureePas: 12`. Un fichier passé de 30 à 5
+minutes sans retoucher ses règles ne dit plus du tout la même chose.
+
+## 5. Le binôme jeune/éducateur
+
+Un créneau ne dit pas seulement qui est présent, il dit **qui est avec qui** : « Mand :
+Valentin / Simon, Habib / Agathe, Héléna / Sabrina » — une activité, trois paires
+nommées. Le modèle d'origine perdait cette information, et avec elle la moitié du sens
+de ses propres règles : `educateurs_autorises` ne pouvait vérifier que la co-présence
+dans la salle, et `rotation_educateur` ne savait pas de quel éducateur le jeune change.
+
+D'où `affectations: [{ jeuneId, educateurId }]` sur le créneau — facultatif et partiel.
+
+**Repli, valable partout :** sans binôme nommé pour un jeune, tous les éducateurs du
+créneau comptent comme étant auprès de lui. C'est ce qui laisse fonctionner à
+l'identique les plannings qui ne nomment pas leurs paires.
+
+**La nature nominative d'un créneau survit aux absences.** Le drapeau `nominatif` du
+planning résolu retient que le créneau *d'origine* nommait ses binômes. Sans lui, une
+absence qui vide les paires d'un créneau le ferait passer pour un collectif, et le
+solveur ne refermerait jamais la paire qu'il vient de rompre — le jeune se retrouverait
+avec un remplaçant, mais sans référent nommé, et les règles en portée binôme
+retomberaient sur le repli sans que personne ne l'ait décidé.
+
+## 6. La portée des règles : `porte`
+
+Une fois les binômes disponibles, chaque règle qui met en rapport un jeune et un
+éducateur doit dire ce qu'elle regarde. `params.porte` :
+
+- `presence` — la personne est sur le créneau, point ;
+- `binome` — elle est nommée auprès de ce jeune.
+
+Les défauts ne sont pas symétriques, et c'est délibéré :
+
+| règle | défaut | pourquoi |
+|---|---|---|
+| `educateurs_autorises` | `binome` | Une autorisation gagne en justesse dès qu'on sait qui accompagne. En `presence`, « L.M. uniquement avec Marie ou Karim » lui interdit toute activité collective à trois adultes. |
+| `educateurs_interdits` | `presence` | Une interdiction ne se relâche pas parce que la donnée s'affine : « pas de stagiaire avec N.K. » reste vrai si le stagiaire est dans la pièce sans en être le référent. |
+| `perimetre_renfort` | `presence` | Règle de sécurité, même raison. |
+| `rotation_educateur` | `binome` | La rotation porte sur l'accompagnant, pas sur qui passe dans la salle. |
+| `continuite_journee` (`sur: "educateurs"`) | `binome` | La rupture que vit le jeune, c'est le changement de référent. |
+
+Le principe derrière la table : **une permission se précise avec la donnée, une
+interdiction ne se relâche pas avec elle.** Changer un défaut change ce que le moteur
+autorise — ce n'est pas un réglage d'affichage.
+
+Une seule fonction porte cette sémantique, `educateursSelonPorte`
+(`src/affectations.ts`) ; les cinq règles s'en servent. Cinq définitions concurrentes de
+la portée finiraient par diverger.
+
+## 7. La semaine, et l'absence qui dure
+
+Deux couches s'ajoutent au-dessus du solveur journalier, sans en réécrire une ligne.
+
+**La semaine n'est pas cinq journées mises bout à bout.** Les quotas hebdomadaires
+(`quota_detachement.maxPasParSemaine`) ne sont visibles que là : un éducateur peut
+respecter son plafond journalier tous les jours de la semaine et dépasser son plafond
+hebdomadaire. `auditeSemaine` (`src/moteur/semaine.ts`) audite chaque jour d'accueil de
+la grille puis passe les plannings obtenus à `evalueSemaine`, qui existait déjà.
+
+**Une absence qui dure se projette sur chaque date.** `FichierPeriode` borne les
+absences par des dates (`du` / `au`), et `reparePeriode` produit un planning par jour
+d'accueil de l'intervalle. Le fichier du jour reste l'unité atomique du moteur : la
+période le fabrique, elle ne le remplace pas.
+
+Quatre points qui ont demandé une décision :
+
+- **Le retour au fonctionnement initial se lit depuis la fin.** `retourNominal` est la
+  première date à partir de laquelle *toutes les suivantes* sont nominales, pas la
+  première journée calme rencontrée. Une accalmie au milieu d'une absence n'est pas un
+  retour à la normale, et l'annoncer comme tel serait un mensonge utile à personne.
+- **Une journée sans créneau est nominale.** Rien à faire veut bien dire rien à changer.
+  Conséquence à connaître : sur une grille dont certains jours sont vides, le retour à
+  la normale peut tomber sur un de ces jours — il est correct, mais il ne prouve rien
+  sur la reprise réelle.
+- **Une absence sans terme oblige à borner la période.** Sinon la série n'a pas de fin.
+  Le moteur lève plutôt que de produire un résultat arbitraire, et la validation le dit
+  avant (`periode.sans-fin`).
+- **Les quotas se comptent par semaine ISO.** Une période à cheval sur deux semaines a
+  deux plafonds distincts, pas un seul étalé sur dix jours. D'où `cleSemaineIso`
+  (`src/dates.ts`).
+
+**Toute l'arithmétique de dates est en UTC.** Construire un `Date` local et ajouter
+24 h se décale d'une heure au passage à l'heure d'hiver, et une série de journées finit
+par sauter ou répéter un jour. Les dates du modèle sont des jours calendaires, pas des
+instants — `src/dates.ts` ne fait rien d'autre que tenir cette distinction.
+
+## 8. Un planning enregistré est figé
+
+Un planning produit et affiché a été imprimé, affiché au mur, annoncé à l'équipe. Il ne
+doit plus bouger — même si la structure évolue ensuite. C'est pourquoi un scénario
+enregistré garde **deux choses** : la situation saisie (« Lucas absent du 14 au 19 ») et
+le gel, c'est-à-dire le résultat tel qu'il a été produit.
+
+Rouvrir un planning enregistré affiche le gel, sans relancer le moteur : sinon ce ne
+serait plus le planning enregistré. « Recalculer » relance le calcul **à côté** et
+`comparePeriodes` dit ce qui aurait changé — quelles journées, quels créneaux, quels
+jeunes. Rien n'est écrasé.
+
+Quand la structure a changé de version depuis l'enregistrement, l'écran le signale avant
+tout le reste : un gel calculé sur une autre structure ne se compare pas naïvement, les
+identifiants ont pu changer de sens.
+
+Le stockage est local (`planning-ime:scenarios`), comme tout le reste. Une semaine gelée
+pèse quelques dizaines de Ko ; le repli IndexedDB ne se justifierait qu'au-delà de ~2 Mo
+cumulés, soit une centaine de scénarios. À surveiller, pas à anticiper.
+
+## 9. L'import depuis un tableur
+
+Le planning réel vit dans un tableur — Numbers, sur iPhone. Deux portes d'entrée :
+coller le contenu copié, ou déposer un fichier CSV/TSV exporté. Les deux passent par le
+même lecteur (`src/import/tableur.ts`), qui ne fait que découper et lire — il ne
+fabrique rien, il ne devine pas qui est jeune ou éducateur.
+
+**Trois propriétés du format ont guidé le lecteur**, déduites du planning réel envoyé en
+capture, pas supposées :
+
+- la première colonne porte les heures, et sert à retrouver la grille (voir décision 4) ;
+- les colonnes suivantes sont des couloirs d'activités simultanées, sans identité
+  fixe — confirmé : un jeune peut décrocher du collectif pour une activité à lui, sur
+  une durée qui n'est pas celle des autres ;
+- une cellule fusionnée sur plusieurs lignes ressort **vide** à l'export : un créneau
+  court donc de sa ligne jusqu'à la prochaine cellule non vide du même couloir.
+
+**Le lecteur ne tranche jamais qui est jeune et qui est éducateur.** Il rend les noms
+tels qu'ils sont écrits (`nomsRencontres`), et c'est un écran de correspondance qui les
+classe avant que quoi que ce soit ne soit chargé — un CSV dit « Marie Dupont », jamais
+`e1`. Les noms déjà connus dans la structure chargée sont pré-remplis par
+correspondance sur les initiales ou le prénom, accents et casse ignorés
+(`proposeCorrespondances`) ; les autres sont proposés comme nouveaux, avec un identifiant
+généré par `slugifie`.
+
+**Assembler, c'est fusionner dans une structure, jamais l'inventer d'un bloc.**
+`assemble()` (`src/import/assemblage.ts`) prend une lecture, un jour, des
+correspondances confirmées, et une structure de départ optionnelle :
+
+- avec une structure (`base`), le jour importé **remplace ses propres créneaux** s'il en
+  avait déjà, et les autres jours ne bougent pas — c'est ce qui rend « compléter la
+  semaine » possible sans dupliquer à chaque réimport du même jour ;
+- sans structure, tout repart de zéro avec ce seul jour — c'est le cas de la toute
+  première importation, sur une application vierge.
+
+Un créneau sans binôme nommé (une activité collective comme « Repas ») garde des listes
+`jeunes`/`educateurs` vides plutôt que d'inventer qui y participe : l'assembleur le
+signale (`import.creneau`), à compléter à la main. Une ligne de cellule qu'il n'a pas su
+lire comme un binôme (« Angie (pas dispo) ») est mise de côté dans `restes` et
+également signalée — jamais absorbée en silence.
+
+Le résultat assemblé passe par la **même validation** que n'importe quel fichier
+(`valideStructure`) avant d'être chargeable : rien ne contourne le contrat.
+
+## 10. Le chiffrement de l'export
+
+Reprise **à l'identique** du schéma de DatABA / DatABA Manager
+(`src/App.jsx:155-185` de DatABA Manager) : WebCrypto, PBKDF2-SHA256 à 150 000
+itérations, sel de 16 octets, AES-GCM-256, IV de 12 octets, enveloppe
+`{ format, version, salt, iv, data }` en base64. Seul le tag change —
+`format: 'planning-ime-encrypted'` — pour qu'un fichier DatABA ne soit jamais pris pour
+un planning, et inversement.
+
+Même schéma dans les trois applications, délibérément : les habitudes et le niveau de
+protection restent les mêmes, et un dépôt qui sait déchiffrer l'un sait déchiffrer
+l'autre sans rien adapter.
+
+Trois réserves, assumées :
+
+1. **Le chiffrement n'anonymise pas.** Il protège le fichier en transit ; quiconque a la
+   phrase de passe lit les prénoms. Si la phrase circule dans la même boîte mail que le
+   fichier, la protection est surtout formelle — l'écran d'export le rappelle au moment
+   de la saisir.
+2. **150 000 itérations PBKDF2** est un peu bas pour une phrase de passe humaine en
+   2026. Choix de parité avec DatABA plutôt que de créer un second standard dans le
+   même écosystème ; monter se ferait dans les trois applications ensemble, pas dans
+   une seule.
+3. **Le contrat de schéma s'affaiblit.** Un fichier chiffré n'est plus validable par un
+   autre outil sans la clé. D'où l'export en clair, toujours proposé à côté — c'est lui
+   qui reste le contrat lisible.
+
+Détail technique qui a demandé une décision : les types WebCrypto (`CryptoKey`,
+`KeyUsage`, `BufferSource`) ne sont pas globaux sans la lib DOM, que ce dépôt exclut
+délibérément du moteur (« il ne connaît ni React ni le DOM », `CLAUDE.md`). Plutôt que
+d'ajouter `"DOM"` à `tsconfig.json` — ce qui ouvrirait tout `src/` aux globals du
+navigateur — `src/transport/chiffrement.ts` importe ces trois noms en **type seul**
+depuis `node:crypto` (`import type { webcrypto } from 'node:crypto'`), effacé à la
+compilation comme dans le navigateur. Aucune valeur n'en vient : `crypto.subtle` et
+`crypto.getRandomValues` restent le global standard, identique en Node et en navigateur.

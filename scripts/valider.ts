@@ -12,6 +12,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Referentiel,
+  auditeSemaine,
   formate,
   repare,
   valideJour,
@@ -38,7 +39,24 @@ if (!resultat.valide) process.exit(1);
 
 const ref = new Referentiel(brut as Structure);
 
-if (!cheminJour) process.exit(0);
+// Sans fichier du jour, on audite la semaine : c'est la lecture qui montre les
+// quotas hebdomadaires, invisibles journee par journee.
+if (!cheminJour) {
+  const semaine = auditeSemaine(ref);
+  console.log(`\n— Semaine type : ${semaine.admissible ? 'admissible' : 'NON admissible'} (cout ${semaine.cout})`);
+  for (const { jour, reparation } of semaine.journees) {
+    const etat = reparation.conflits.length > 0
+      ? `${reparation.conflits.length} conflit(s)`
+      : reparation.violations.length > 0
+        ? `${reparation.violations.length} regle(s) violee(s)`
+        : 'rien a signaler';
+    console.log(`    ${jour.padEnd(9)} ${String(reparation.planning.creneaux.length).padStart(3)} creneaux — ${etat}`);
+  }
+  for (const v of semaine.violationsHebdomadaires) {
+    console.log(`    [hebdo] ${v.regleId} — ${v.message}`);
+  }
+  process.exit(semaine.admissible ? 0 : 1);
+}
 
 const brutJour = lis(cheminJour) as FichierJour;
 const resultatJour = valideJour(ref, brutJour);
