@@ -361,10 +361,15 @@ export interface CreneauLu {
   fin: string;
   /**
    * `true` quand `fin` n'a pas ete trouvee dans le fichier — ce couloir ne
-   * comporte plus aucune cellule non vide apres celle-ci, jusqu'a la
-   * fermeture de la journee. Un CSV ne distingue pas « fusionne jusqu'ici
-   * puis vraiment vide » de « fusionne jusqu'a la fin de la feuille » : la
-   * fusion d'origine ne survit pas a l'export. Peut arriver a n'importe quel
+   * comporte plus aucune cellule non vide apres celle-ci. Un CSV ne distingue
+   * pas « fusionne jusqu'ici puis vraiment vide » de « fusionne plus loin » :
+   * la fusion d'origine ne survit pas a l'export. Dans ce cas `fin` est repliee
+   * sur la PROCHAINE borne de la grille, pas sur la fermeture de la journee —
+   * un repli minimal plutot que maximal. Fermer sur la fin de journee a
+   * produit, sur un fichier reel, des creneaux de 15 minutes gonfles a 5
+   * heures, qui chevauchaient mecaniquement toutes les activites suivantes du
+   * meme jeune dans d'autres couloirs (des centaines de `creneau.chevauchement`
+   * sans rapport apparent avec la cause). Peut arriver a n'importe quel
    * couloir, pas seulement a celui de la toute derniere ligne.
    */
   finDeduite: boolean;
@@ -459,8 +464,10 @@ export function litPlanning(table: readonly (readonly string[])[]): PlanningLu {
       if (!cellule) continue;
 
       // Cellule fusionnee : elle court jusqu'a la prochaine rangee dont la
-      // cellule de ce couloir est non vide, ou jusqu'a la fin de la journee
-      // si ce couloir ne comporte plus rien ensuite (`finDeduite`).
+      // cellule de ce couloir est non vide. Si ce couloir ne comporte plus
+      // rien ensuite (`finDeduite`), le repli est la PROCHAINE borne de la
+      // grille — le minimum plausible, pas la fermeture de journee (le
+      // maximum) : voir le commentaire de `CreneauLu.finDeduite`.
       let suivante = r + 1;
       while (suivante < rangees.length && (table[rangees[suivante]!.ligne]?.[col] ?? '').trim() === '') {
         suivante++;
@@ -471,7 +478,7 @@ export function litPlanning(table: readonly (readonly string[])[]): PlanningLu {
         couloir: col,
         jour: jourDuCouloir,
         debut: rangees[r]!.heure,
-        fin: finTrouvee ? rangees[suivante]!.heure : fin,
+        fin: finTrouvee ? rangees[suivante]!.heure : (rangees[r + 1]?.heure ?? fin),
         finDeduite: !finTrouvee,
         activite: cellule.activite,
         binomes: cellule.binomes,
@@ -490,17 +497,17 @@ export function litPlanning(table: readonly (readonly string[])[]): PlanningLu {
   }
 
   // Un couloir qui ne comporte plus rien apres une cellule voit sa duree
-  // fermee sur la fin de journee — un CSV ne distingue pas ca d'une vraie
-  // fusion jusqu'au bout. Ca peut arriver a n'importe quel couloir, pas
-  // seulement a la derniere ligne : compte precis plutot qu'une phrase
+  // repliee sur la PROCHAINE borne de la grille — un CSV ne distingue pas ca
+  // d'une vraie fusion plus longue. Ca peut arriver a n'importe quel couloir,
+  // pas seulement a la derniere ligne : compte precis plutot qu'une phrase
   // generique qui laisserait croire que seule la toute derniere cellule est
   // concernee.
   const dureeIncertaine = creneaux.filter((c) => c.finDeduite && c.debut !== c.fin);
   if (dureeIncertaine.length > 0) {
     remarques.push(
-      `${dureeIncertaine.length} creneau(x) se prolongent jusqu'a la fermeture de la journee (${fin}) ` +
-        "faute de cellule suivante dans leur couloir : leur duree reelle est incertaine, a verifier " +
-        '— possible collision avec un creneau plus tard dans la meme colonne.',
+      `${dureeIncertaine.length} creneau(x) sont replies sur le prochain creneau de la grille ` +
+        "faute de cellule suivante dans leur couloir : leur duree reelle est peut-etre plus longue, " +
+        'a verifier.',
     );
   }
 

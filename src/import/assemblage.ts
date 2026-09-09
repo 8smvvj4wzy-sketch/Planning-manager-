@@ -365,7 +365,8 @@ export function assemble(planningLu: PlanningLu, options: OptionsAssemblage): Re
           'import.duree-incertaine',
           `/planningType`,
           `"${creneau.activite}" ${creneau.debut}–${creneau.fin} (${jour}) : ce couloir ne comporte plus ` +
-            'rien ensuite, la fin a ete deduite de la fermeture de journee — duree reelle a verifier',
+            'rien ensuite, la fin a ete repliee sur le prochain creneau de la grille — duree reelle ' +
+            'peut-etre plus longue, a verifier',
         ),
       );
     }

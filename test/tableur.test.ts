@@ -286,8 +286,22 @@ describe('lecture d un planning à un seul jour', () => {
     assert.equal(repas.fin, '12:10');
   });
 
+  it('replie un couloir jamais réutilisé sur le prochain créneau de la grille, pas sur la fin de journée', () => {
+    // « Détaché » à 10h30 ne réapparaît plus jamais dans son couloir alors que
+    // d'autres couloirs continuent (le protocole tourne jusqu'à 13h10) : sa fin
+    // se replie sur la borne suivante (11h), pas sur la fermeture de journée
+    // (15h30) — un repli minimal, pas maximal.
+    const detache = lu.creneaux.find((c) => c.activite === 'Détaché')!;
+    assert.equal(detache.debut, '10:30');
+    assert.equal(detache.fin, '11:00');
+    assert.equal(detache.finDeduite, true);
+  });
+
   it('dit ce qu il a dû supposer', () => {
-    assert.ok(lu.remarques.some((r) => r.includes('15:30')), 'la fin de journée est une hypothèse');
+    assert.ok(
+      lu.remarques.some((r) => r.includes('replies sur le prochain creneau')),
+      'une durée repliée sur la borne suivante est une hypothèse',
+    );
     assert.ok(lu.remarques.some((r) => r.includes('5 minutes')), 'le pas déduit mérite d’être signalé');
   });
 
