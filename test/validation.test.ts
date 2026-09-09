@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { valideJour, valideStructure } from '../src/index.ts';
+import { estChargeable, valideJour, valideStructure } from '../src/index.ts';
 import type { Structure } from '../src/index.ts';
 import { jourExemple, referentielExemple, structureExemple, structureMinimale } from './aide.ts';
 
@@ -125,6 +125,36 @@ describe('validation de structure.json', () => {
     assert.equal(resultat.valide, true);
     assert.ok(codes(resultat.problemes).includes('regle.poids'));
     assert.ok(codes(resultat.problemes).includes('regle.commentaire'));
+  });
+});
+
+describe('ce qui bloque un chargement, et ce qui ne le bloque pas', () => {
+  it('laisse charger un planning qui se chevauche : c est ça qu on vient corriger', () => {
+    // Deux créneaux au même moment sur le même éducateur — le cas courant d'un
+    // vrai planning importé. La validation le signale, mais l'application doit
+    // pouvoir l'afficher : c'est dans la grille qu'on le répare.
+    const structure = structureMinimale();
+    const premier = structure.planningType[0]!;
+    structure.planningType.push({ ...premier, id: `${premier.id}-bis` });
+    const resultat = valideStructure(structure);
+
+    assert.equal(resultat.valide, false);
+    assert.ok(codes(resultat.problemes).includes('creneau.chevauchement'));
+    assert.equal(estChargeable(resultat), true);
+  });
+
+  it('refuse un fichier dont la forme ne tient pas', () => {
+    // Sans `grille`, il n'y a pas de planning à corriger — seulement un écran
+    // blanc et une exception.
+    const structure = structureMinimale() as unknown as Record<string, unknown>;
+    delete structure['grille'];
+    const resultat = valideStructure(structure);
+
+    assert.equal(estChargeable(resultat), false);
+  });
+
+  it('laisse charger un fichier sans le moindre problème', () => {
+    assert.equal(estChargeable(valideStructure(structureExemple())), true);
   });
 });
 
