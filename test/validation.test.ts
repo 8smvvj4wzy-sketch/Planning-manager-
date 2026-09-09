@@ -128,6 +128,54 @@ describe('validation de structure.json', () => {
   });
 });
 
+describe('un chevauchement se signale une fois, pas à chaque pas', () => {
+  it('rend une seule erreur par collision, avec sa plage horaire', () => {
+    // Deux créneaux de 2 pas superposés sur le même éducateur. Signaler pas par
+    // pas donnerait deux lignes identiques ici — et 66 sur un planning réel au
+    // pas de 5 minutes, pour trois collisions.
+    const structure = structureMinimale();
+    structure.planningType.push({
+      ...structure.planningType[0]!,
+      id: 'c2',
+      salleId: 'sb',
+      jeunes: ['jb'],
+    });
+    const chevauchements = valideStructure(structure).problemes.filter(
+      (p) => p.code === 'creneau.chevauchement',
+    );
+
+    assert.equal(chevauchements.length, 1, 'une collision, une ligne');
+    assert.match(chevauchements[0]!.message, /educateur "ea"/);
+    assert.match(chevauchements[0]!.message, /de 09:00 a 10:00/, 'la plage entière, pas un instant');
+  });
+
+  it('dit « à telle heure » quand la collision ne dure qu un pas', () => {
+    const structure = structureMinimale();
+    structure.planningType[0]!.pas = 1;
+    structure.planningType.push({ ...structure.planningType[0]!, id: 'c2', salleId: 'sb', pas: 1 });
+    const [chevauchement] = valideStructure(structure).problemes.filter(
+      (p) => p.code === 'creneau.chevauchement',
+    );
+    assert.match(chevauchement!.message, /a 09:00/);
+  });
+
+  it('sépare deux personnes en collision sur les mêmes créneaux', () => {
+    // Une ligne par personne : c'est elle qu'on retire pour corriger, pas « la
+    // collision » en bloc.
+    const structure = structureMinimale();
+    structure.planningType[0]!.jeunes = ['ja', 'jb'];
+    structure.planningType.push({ ...structure.planningType[0]!, id: 'c2', salleId: 'sb' });
+    const messages = valideStructure(structure)
+      .problemes.filter((p) => p.code === 'creneau.chevauchement')
+      .map((p) => p.message);
+
+    assert.equal(messages.length, 3, 'deux jeunes et un éducateur');
+    assert.ok(messages.some((m) => m.includes('jeune "ja"')));
+    assert.ok(messages.some((m) => m.includes('jeune "jb"')));
+    assert.ok(messages.some((m) => m.includes('educateur "ea"')));
+  });
+});
+
 describe('ce qui bloque un chargement, et ce qui ne le bloque pas', () => {
   it('laisse charger un planning qui se chevauche : c est ça qu on vient corriger', () => {
     // Deux créneaux au même moment sur le même éducateur — le cas courant d'un

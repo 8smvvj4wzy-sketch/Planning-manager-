@@ -286,7 +286,18 @@ function verifieAffectations(ref: Referentiel): Probleme[] {
   return problemes;
 }
 
-/** Un jeune, un educateur ou une salle ne peuvent pas etre a deux endroits a la fois. */
+/**
+ * Un jeune, un educateur ou une salle ne peuvent pas etre a deux endroits a la
+ * fois.
+ *
+ * UN probleme par collision, pas un par pas. La detection travaille pas par pas
+ * — c'est le seul moyen de comparer des creneaux qui ne s'alignent pas — mais
+ * elle regroupe avant de rendre : « untel est aussi sur X de 13h30 a 14h30 »
+ * plutot que douze lignes identiques a cinq minutes d'intervalle. Sur un
+ * planning importe, un pas de 5 minutes transformait trois collisions reelles
+ * en 66 lignes, dont les 50 premieres seules etaient affichees : le lecteur ne
+ * voyait meme pas qu'il n'y en avait que trois.
+ */
 function verifieChevauchements(ref: Referentiel): Probleme[] {
   const problemes: Probleme[] = [];
 
@@ -297,6 +308,8 @@ function verifieChevauchements(ref: Referentiel): Probleme[] {
       educateurs: new Map<string, Map<number, string>>(),
       salles: new Map<string, Map<number, string>>(),
     };
+    /** Une collision = un creneau, un autre creneau, une personne. Les pas s'y accumulent. */
+    const collisions = new Map<string, { index: number; libelle: string; id: string; autre: string; pas: number[] }>();
 
     for (const creneau of creneaux) {
       const index = ref.structure.planningType.indexOf(creneau);
@@ -313,13 +326,10 @@ function verifieChevauchements(ref: Referentiel): Probleme[] {
           for (const p of pas) {
             const autre = parPas.get(p);
             if (autre && autre !== creneau.id) {
-              problemes.push(
-                erreur(
-                  'creneau.chevauchement',
-                  `/planningType/${index}`,
-                  `${libelle} "${id}" est aussi sur "${autre}" a ${ref.grille.heureDePas(p)} (${jour})`,
-                ),
-              );
+              const cle = `${table}|${id}|${creneau.id}|${autre}`;
+              const collision = collisions.get(cle) ?? { index, libelle, id, autre, pas: [] };
+              collision.pas.push(p);
+              collisions.set(cle, collision);
             } else {
               parPas.set(p, creneau.id);
             }
@@ -327,6 +337,22 @@ function verifieChevauchements(ref: Referentiel): Probleme[] {
           occupation[table].set(id, parPas);
         }
       }
+    }
+
+    for (const { index, libelle, id, autre, pas } of collisions.values()) {
+      const premier = Math.min(...pas);
+      const dernier = Math.max(...pas);
+      const quand =
+        premier === dernier
+          ? `a ${ref.grille.heureDePas(premier)}`
+          : `de ${ref.grille.heureDePas(premier)} a ${ref.grille.heureDePas(dernier + 1)}`;
+      problemes.push(
+        erreur(
+          'creneau.chevauchement',
+          `/planningType/${index}`,
+          `${libelle} "${id}" est aussi sur "${autre}" ${quand} (${jour})`,
+        ),
+      );
     }
   }
   return problemes;

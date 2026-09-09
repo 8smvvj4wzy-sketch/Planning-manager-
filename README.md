@@ -8,7 +8,7 @@ Deux couches, et la séparation est le principe :
 
 | couche | ce qu'elle fait |
 |---|---|
-| `src/` — le moteur, TypeScript | Ce fichier est-il exploitable ? (`valideStructure`) — Quelles règles ce planning viole-t-il ? (`evalue`) — Que devient la journée quand untel est absent ? (`repare`) — Et la semaine, jusqu'au retour à la normale ? (`reparePeriode`) |
+| `src/` — le moteur, TypeScript | Ce fichier est-il exploitable ? (`valideStructure`) — Quelles règles ce planning viole-t-il ? (`evalue`) — Que devient la journée quand untel est absent ? (`repare`) — Et la semaine, jusqu'au retour à la normale ? (`reparePeriode`) — Comment corriger un créneau sans casser le reste ? (`src/edition.ts`) |
 | `interface/` — l'application, React | Grille du planning, saisie d'une absence qui dure, plannings enregistrés, import depuis un tableur, réglages. Ne recalcule rien : appelle le moteur et affiche ce qu'il rend. |
 
 ## Démarrer
@@ -33,7 +33,10 @@ imprime le planning obtenu.
 
 **Écran Planning** — la grille, par salle, par éducateur ou par jeune. Une case vide sur
 l'axe « salle » est une salle libre : ce n'est pas un module à part, c'est la même
-grille lue à l'envers.
+grille lue à l'envers. Cliquer un créneau l'ouvre et le **modifie** : horaires, salle,
+jeunes, éducateurs, suppression. Un planning importé arrive presque toujours avec de
+vraies collisions — deux activités au même moment, quelqu'un affecté deux fois : elles
+sont listées au-dessus de la grille, et cliquer l'une d'elles ouvre le créneau fautif.
 
 **Écran Période** — une situation qui dure (« Lucas absent du 14 au 19 ») projetée sur
 chaque jour d'accueil, jusqu'au **retour au fonctionnement initial** — la première date
@@ -51,7 +54,9 @@ jeune, éducateur, ou à ignorer — avant que quoi que ce soit ne soit chargé 
 dit « Marie Dupont », jamais `e1`.
 
 **Écran Règles** — activer, pondérer, régler la portée (`presence` / `binome`) des
-règles chargées. **Écran Structure** — ce que la structure chargée contient, en lecture.
+règles chargées. **Écran Structure** — ce que la structure chargée contient, en lecture,
+plus la saisie des **salles** : un planning de tableur n'en nomme jamais, elles n'ont
+pas d'autre endroit où exister.
 **Écran Réglages** — les arbitrages du moteur (priorité de réparation, détachement,
 encadrement), le thème, le stockage local.
 

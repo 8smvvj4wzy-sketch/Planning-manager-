@@ -12,6 +12,18 @@ export { GrilleTemps, estHeureValide, heureEnMinutes, minutesEnHeure } from './t
 export { Referentiel } from './referentiel.ts';
 
 export {
+  ajouteCreneau,
+  ajouteSalle,
+  modifieCreneau,
+  modifieSalle,
+  retireDuCreneau,
+  supprimeCreneau,
+  supprimeSalle,
+  termineCreneauA,
+  type ChangementCreneau,
+} from './edition.ts';
+
+export {
   Planning,
   creneauxSeChevauchent,
   estFige,

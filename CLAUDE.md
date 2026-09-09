@@ -103,6 +103,19 @@ tests et n'est jamais importé depuis `interface/`.
   durées également invérifiables, la plus courte est celle qui invente le moins de
   chevauchements. Signaler l'incertitude (`import.duree-incertaine`) ne suffit pas si la
   valeur choisie est le pire des deux extrêmes.
+- **Une modification d'un créneau entraîne ce qui la suit.** `src/edition.ts` maintient
+  les invariants que la validation exige, plutôt que de laisser l'interface les
+  reconstituer : retirer quelqu'un d'un créneau retire ses `affectations`, supprimer une
+  salle l'efface aussi des `activites[].sallesPossibles` et des créneaux qui s'y tenaient
+  (cette dernière a été trouvée par un test, pas à la relecture). Sans ça, un geste
+  anodin à l'écran produit un fichier invalide juste après — exactement ce que
+  l'utilisateur venait corriger. Comme `repare`, ces fonctions ne modifient rien sur
+  place : elles rendent une nouvelle structure.
+- **Un chevauchement se signale une fois, pas à chaque pas.** La détection travaille pas
+  par pas — seul moyen de comparer des créneaux qui ne s'alignent pas — mais
+  `verifieChevauchements` regroupe avant de rendre. Au pas de 5 minutes, trois collisions
+  réelles donnaient 66 lignes, dont seules les 50 premières s'affichaient : le lecteur ne
+  voyait même pas qu'il n'y en avait que trois.
 - **Les erreurs de cohérence ne bloquent pas le chargement ; la forme, si.** Un planning
   réel comporte presque toujours de vraies collisions — deux activités au même moment, un
   éducateur nommé à deux endroits. Refuser de charger tant qu'elles restent condamnait
