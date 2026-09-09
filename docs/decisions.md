@@ -504,3 +504,43 @@ L'utilisateur l'a dit sans détour — « l'app est inutilisable, je ne peux rie
 Le moteur, lui, n'avait pas besoin d'être changé : l'interface construit déjà
 `new Referentiel(structure)` directement, sans passer par `chargeStructure` qui lève. Un
 chevauchement n'est pas une corruption — c'est un conflit, et un conflit s'affiche.
+
+## 15. Un éditeur, parce qu'un planning réel ne se corrige pas dans le tableur
+
+Les §13 et §14 ont rendu le fichier lisible et chargeable. Restaient les vrais conflits —
+ceux que le tableur contient réellement — et aucun moyen de les corriger : l'écran
+Structure était en lecture seule, la modale d'un créneau aussi. L'utilisateur voyait le
+problème sans pouvoir y toucher.
+
+**Les gestes d'édition sont dans `src/edition.ts`, pas dans l'interface.** C'est la règle
+d'architecture du dépôt, et elle se justifie ici mieux qu'ailleurs : modifier un créneau
+n'est pas un `setState`, c'est une opération qui doit maintenir des invariants que la
+validation vérifiera juste après.
+
+- Retirer un jeune ou un éducateur d'un créneau retire ses `affectations` : un binôme
+  nommant quelqu'un d'absent du créneau est refusé par le schéma.
+- Supprimer une salle l'efface des créneaux qui s'y tenaient **et** des
+  `activites[].sallesPossibles`. Ce second point a été trouvé par un test, pas à la
+  relecture — la première version laissait une référence pendante et rendait la structure
+  invalide après un geste sans ambiguïté.
+- `termineCreneauA` s'exprime en heure, pas en pas : c'est ainsi qu'on lit la grille
+  (« ça doit s'arrêter à 13h30 »), et c'est la correction la plus fréquente d'un
+  chevauchement venu d'un import.
+
+Comme `repare`, rien n'est modifié sur place : chaque fonction rend une nouvelle
+structure. L'appelant garde la précédente, ce qui rend l'annulation possible et évite
+qu'un rendu React parte d'un objet muté sous lui.
+
+**Ce qui reste hors de l'éditeur.** Une journée analysée est un résultat du moteur, pas
+une source : elle ne se modifie pas. Seul le planning type s'édite, et l'écran le dit
+quand on ouvre un créneau depuis une journée réparée.
+
+**Les salles se saisissent dans l'application.** Un planning manuscrit ne les nomme
+jamais ; elles n'ont donc aucun autre endroit où exister, et sans elles l'axe « par
+salle » de la grille n'a rien à montrer. C'est la seule partie de l'écran Structure qui
+ne soit pas en lecture seule, et c'est délibéré : le reste vient d'un fichier, pas elles.
+
+**D'une erreur au créneau fautif.** Une liste d'erreurs ne dit pas où aller. Chaque
+problème dont le pointeur vise un créneau (`/planningType/14`) est désormais cliquable :
+l'écran se recale sur le bon jour, bascule sur le planning type, et ouvre le créneau.
+C'est ce qui transforme une liste en file de travail.

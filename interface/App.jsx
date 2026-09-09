@@ -25,6 +25,7 @@ import {
   Info,
   Moon,
   Pin,
+  Plus,
   Printer,
   RefreshCw,
   Save,
@@ -42,6 +43,7 @@ import {
 import {
   JOURS,
   Referentiel,
+  ajouteSalle,
   assemble,
   auditeJourNominal,
   calculDisponibilite,
@@ -57,12 +59,18 @@ import {
   etatJourNominal,
   jeunesSansAffectation,
   litPlanning,
+  modifieCreneau,
+  modifieSalle,
   nomsRencontres,
   optionsAvec,
   planningTypeDuJour,
   proposeCorrespondances,
   reparePeriode,
+  retireDuCreneau,
   sallesLibres,
+  supprimeCreneau,
+  supprimeSalle,
+  termineCreneauA,
   validePeriode,
   valideStructure,
 } from '../src/index.ts';
@@ -333,10 +341,20 @@ function Bandeau({ ton = 'info', icone: Icone, titre, children }) {
   );
 }
 
+/* Index du créneau visé par un pointeur de validation, ou `null` si le problème
+   porte sur autre chose. Le pointeur est produit par `src/validation` sous la
+   forme « /planningType/14 » : c'est ce qui permet de passer d'une erreur au
+   créneau à corriger, au lieu de laisser l'utilisateur le chercher. */
+function creneauDuChemin(chemin) {
+  const m = /^\/planningType\/(\d+)/.exec(chemin ?? '');
+  return m ? Number(m[1]) : null;
+}
+
 /* Liste de problèmes de validation, avec son code et son pointeur JSON : c'est
    ce qui permet de retrouver le champ fautif dans le fichier sans le relire
-   en entier. */
-function ListeProblemes({ problemes, limite = 50 }) {
+   en entier. Avec `onProbleme`, chaque ligne qui vise un créneau devient
+   cliquable et l'ouvre dans l'éditeur. */
+function ListeProblemes({ problemes, limite = 50, onProbleme }) {
   if (problemes.length === 0) {
     return (
       <Bandeau ton="succes" icone={Check} titre="Aucun problème">
@@ -350,7 +368,17 @@ function ListeProblemes({ problemes, limite = 50 }) {
       {affiches.map((p, i) => (
         <div
           key={`${p.chemin}-${p.code}-${i}`}
-          className="flex items-start gap-2 rounded-lg border px-3 py-2 text-sm"
+          {...(onProbleme && creneauDuChemin(p.chemin) !== null
+            ? {
+                role: 'button',
+                tabIndex: 0,
+                onClick: () => onProbleme(p),
+                onKeyDown: (e) => (e.key === 'Enter' || e.key === ' ') && onProbleme(p),
+                title: 'Ouvrir ce créneau pour le corriger',
+                className:
+                  'flex w-full cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 text-left text-sm',
+              }
+            : { className: 'flex items-start gap-2 rounded-lg border px-3 py-2 text-sm' })}
           style={{
             borderColor: p.gravite === 'erreur' ? 'var(--crisis)' : 'var(--border)',
             background: 'var(--card)',
@@ -642,11 +670,104 @@ function Grille({ referentiel, planning, axe, signalements, onCreneau }) {
    elle afficherait un état figé au moment du clic pendant que le planning
    change derrière elle (leçon de DatABA Manager). */
 
-function DetailCreneau({ referentiel, planning, creneauId, violations, conflit, onFermer }) {
+/* Chips d'une liste de personnes, retirables quand le créneau est éditable.
+   Le même bloc sert aux jeunes et aux éducateurs : la seule différence est ce
+   qu'on affiche, pas ce qu'on fait. */
+function ListePersonnes({ titre, couleur, ids, catalogue, vide, titrePour, editable, onRetirer, onAjouter }) {
+  const absents = catalogue.filter((p) => !ids.includes(p.id));
+  return (
+    <div>
+      <dt>
+        <Etiquette>
+          {titre} ({ids.length})
+        </Etiquette>
+      </dt>
+      <dd className="flex flex-wrap items-center gap-1.5 pt-1">
+        {ids.length === 0 ? (
+          <span style={{ color: vide.alerte ? 'var(--crisis)' : 'var(--ink-soft)' }}>{vide.texte}</span>
+        ) : (
+          ids.map((id) => (
+            <span key={id} className="inline-flex items-center gap-1">
+              <Badge couleur={couleur} titre={titrePour(id)}>
+                {catalogue.find((p) => p.id === id)?.nom ?? id}
+              </Badge>
+              {editable && (
+                <button
+                  type="button"
+                  onClick={() => onRetirer(id)}
+                  aria-label={`Retirer ${catalogue.find((p) => p.id === id)?.nom ?? id}`}
+                  title="Retirer de ce créneau"
+                  className="rounded-md border p-0.5"
+                  style={{ borderColor: 'var(--border)', color: 'var(--ink-soft)' }}
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </span>
+          ))
+        )}
+        {editable && absents.length > 0 && (
+          <select
+            className="rounded-lg border px-2 py-1 text-xs"
+            style={styleSaisie}
+            value=""
+            aria-label={`Ajouter ${titre.toLowerCase()}`}
+            onChange={(e) => e.target.value && onAjouter(e.target.value)}
+          >
+            <option value="">+ ajouter…</option>
+            {absents.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.nom}
+              </option>
+            ))}
+          </select>
+        )}
+      </dd>
+    </div>
+  );
+}
+
+/* Détail d'un créneau, et son éditeur.
+   La modale ne retient que `creneauId` : elle relit le planning et la structure
+   à chaque rendu. Garder l'objet figerait l'état du moment du clic pendant que
+   le planning change derrière — y compris sous les modifications faites ici. */
+function DetailCreneau({
+  referentiel,
+  structure,
+  setStructure,
+  planning,
+  creneauId,
+  violations,
+  conflit,
+  modifiable,
+  onFermer,
+}) {
   const creneau = planning.creneau(creneauId);
+  const dansStructure = structure?.planningType.find((c) => c.id === creneauId) ?? null;
   if (!creneau) return null;
+
+  /* On ne modifie que le planning TYPE : une journée réparée est un résultat
+     figé, produit par le moteur, pas une source qu'on retouche. */
+  const editable = Boolean(modifiable && dansStructure && setStructure);
+  const grille = referentiel.grille;
   const activite = referentiel.activite(creneau.activiteId);
-  const fin = referentiel.grille.heureDePas(creneau.pasDebut + creneau.pas);
+  const debut = grille.heureDePas(creneau.pasDebut);
+  const fin = grille.heureDePas(creneau.pasDebut + creneau.pas);
+
+  const appliquer = (changement) => setStructure(modifieCreneau(structure, creneauId, changement));
+
+  const supprimer = () => {
+    const nom = activite?.nom ?? creneau.activiteId;
+    if (!window.confirm(`Supprimer « ${nom} » ${debut}–${fin} du planning type ?`)) return;
+    setStructure(supprimeCreneau(structure, creneauId));
+    onFermer();
+  };
+
+  const heures = (premier, dernier) =>
+    Array.from({ length: dernier - premier + 1 }, (_, i) => {
+      const h = grille.heureDePas(premier + i);
+      return { valeur: h, libelle: h };
+    });
 
   return (
     <div
@@ -668,7 +789,7 @@ function DetailCreneau({ referentiel, planning, creneauId, violations, conflit, 
               {activite?.nom ?? creneau.activiteId}
             </h3>
             <p className="text-sm" style={{ color: 'var(--ink-soft)', fontFamily: F_MONO }}>
-              {referentiel.grille.heureDePas(creneau.pasDebut)} – {fin} · {creneau.id}
+              {debut} – {fin} · {creneau.id}
             </p>
           </div>
           <button
@@ -682,49 +803,117 @@ function DetailCreneau({ referentiel, planning, creneauId, violations, conflit, 
           </button>
         </div>
 
+        {!editable && modifiable === false && (
+          <p className="mt-3 text-xs" style={{ color: 'var(--ink-soft)' }}>
+            Une journée analysée est un résultat du moteur, pas une source : elle ne se modifie pas ici.
+            Passez sur « Planning type » pour corriger le planning de référence.
+          </p>
+        )}
+
         <dl className="mt-4 space-y-3 text-sm">
+          {editable && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Champ libelle="Début">
+                <Selecteur
+                  valeur={debut}
+                  onChange={(h) => appliquer({ debut: h })}
+                  options={heures(0, grille.nbPas - 1)}
+                />
+              </Champ>
+              <Champ libelle="Fin" aide="Déplacer le début conserve la durée ; changer la fin la modifie.">
+                <Selecteur
+                  valeur={fin}
+                  onChange={(h) => setStructure(termineCreneauA(structure, creneauId, h))}
+                  options={heures(creneau.pasDebut + 1, grille.nbPas)}
+                />
+              </Champ>
+            </div>
+          )}
+
           <div>
-            <dt><Etiquette>Salle</Etiquette></dt>
-            <dd style={{ color: 'var(--ink)' }}>
-              {creneau.salleId ? (referentiel.salle(creneau.salleId)?.nom ?? creneau.salleId) : 'aucune'}
-            </dd>
-          </div>
-          <div>
-            <dt><Etiquette>Jeunes ({creneau.jeunes.length})</Etiquette></dt>
-            <dd className="flex flex-wrap gap-1.5 pt-1">
-              {creneau.jeunes.length === 0 ? (
-                <span style={{ color: 'var(--ink-soft)' }}>aucun jeune présent</span>
+            <dt>
+              <Etiquette>Salle</Etiquette>
+            </dt>
+            <dd style={{ color: 'var(--ink)' }} className="pt-1">
+              {editable ? (
+                referentiel.structure.salles.length === 0 ? (
+                  <span className="text-xs" style={{ color: 'var(--ink-soft)' }}>
+                    Aucune salle dans cette structure — elles se créent dans l’écran Structure.
+                  </span>
+                ) : (
+                  <Selecteur
+                    valeur={creneau.salleId ?? ''}
+                    onChange={(v) => appliquer({ salleId: v === '' ? null : v })}
+                    options={[
+                      { valeur: '', libelle: 'aucune' },
+                      ...referentiel.structure.salles.map((s) => ({ valeur: s.id, libelle: s.nom })),
+                    ]}
+                  />
+                )
+              ) : creneau.salleId ? (
+                (referentiel.salle(creneau.salleId)?.nom ?? creneau.salleId)
               ) : (
-                creneau.jeunes.map((id) => (
-                  <Badge key={id} couleur={CAT_INDIGO} titre={`encadrement ${referentiel.jeune(id)?.encadrement ?? '?'}`}>
-                    {referentiel.libelleJeune(id)}
-                  </Badge>
-                ))
+                'aucune'
               )}
             </dd>
           </div>
-          <div>
-            <dt><Etiquette>Éducateurs ({creneau.educateurs.length})</Etiquette></dt>
-            <dd className="flex flex-wrap gap-1.5 pt-1">
-              {creneau.educateurs.length === 0 ? (
-                <span style={{ color: 'var(--crisis)' }}>aucun éducateur</span>
-              ) : (
-                creneau.educateurs.map((id) => (
-                  <Badge key={id} couleur={CAT_TEAL} titre={referentiel.educateur(id)?.statut}>
-                    {referentiel.libelleEducateur(id)}
-                  </Badge>
-                ))
-              )}
-            </dd>
-          </div>
-          {(creneau.verrouille || creneau.epingle) && (
+
+          <ListePersonnes
+            titre="Jeunes"
+            couleur={CAT_INDIGO}
+            ids={creneau.jeunes}
+            catalogue={referentiel.structure.jeunes
+              .filter((j) => j.actif)
+              .map((j) => ({ id: j.id, nom: referentiel.libelleJeune(j.id) }))}
+            vide={{ texte: 'aucun jeune présent', alerte: false }}
+            titrePour={(id) => `encadrement ${referentiel.jeune(id)?.encadrement ?? '?'}`}
+            editable={editable}
+            onRetirer={(id) => setStructure(retireDuCreneau(structure, creneauId, { type: 'jeune', id }))}
+            onAjouter={(id) => appliquer({ jeunes: [...creneau.jeunes, id] })}
+          />
+
+          <ListePersonnes
+            titre="Éducateurs"
+            couleur={CAT_TEAL}
+            ids={creneau.educateurs}
+            catalogue={referentiel.structure.educateurs
+              .filter((e) => e.actif)
+              .map((e) => ({ id: e.id, nom: referentiel.libelleEducateur(e.id) }))}
+            vide={{ texte: 'aucun éducateur', alerte: true }}
+            titrePour={(id) => referentiel.educateur(id)?.statut ?? ''}
+            editable={editable}
+            onRetirer={(id) => setStructure(retireDuCreneau(structure, creneauId, { type: 'educateur', id }))}
+            onAjouter={(id) => appliquer({ educateurs: [...creneau.educateurs, id] })}
+          />
+
+          {editable ? (
             <div>
-              <dt><Etiquette>Statut</Etiquette></dt>
-              <dd style={{ color: 'var(--ink)' }}>
-                {creneau.verrouille && 'Verrouillé dans la structure — le moteur contourne au lieu de le déplacer. '}
-                {creneau.epingle && 'Épinglé pour aujourd’hui.'}
+              <dt>
+                <Etiquette>Statut</Etiquette>
+              </dt>
+              <dd className="pt-1">
+                <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--ink)' }}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(dansStructure.verrouille)}
+                    onChange={(e) => appliquer({ verrouille: e.target.checked })}
+                  />
+                  Verrouillé — le moteur contourne ce créneau au lieu de le déplacer
+                </label>
               </dd>
             </div>
+          ) : (
+            (creneau.verrouille || creneau.epingle) && (
+              <div>
+                <dt>
+                  <Etiquette>Statut</Etiquette>
+                </dt>
+                <dd style={{ color: 'var(--ink)' }}>
+                  {creneau.verrouille && 'Verrouillé dans la structure — le moteur contourne au lieu de le déplacer. '}
+                  {creneau.epingle && 'Épinglé pour aujourd’hui.'}
+                </dd>
+              </div>
+            )
           )}
         </dl>
 
@@ -754,6 +943,17 @@ function DetailCreneau({ referentiel, planning, creneauId, violations, conflit, 
             ))}
           </div>
         )}
+
+        {editable && (
+          <div className="mt-5 flex items-center justify-between gap-3 border-t pt-4" style={{ borderColor: 'var(--border)' }}>
+            <p className="text-xs" style={{ color: 'var(--ink-soft)' }}>
+              Les modifications s’appliquent au planning type et sont enregistrées localement.
+            </p>
+            <Bouton variante="danger" icone={Trash2} onClick={supprimer}>
+              Supprimer
+            </Bouton>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -763,6 +963,8 @@ function DetailCreneau({ referentiel, planning, creneauId, violations, conflit, 
 
 function EcranPlanning({
   referentiel,
+  structure,
+  setStructure,
   jourAffiche,
   setJourAffiche,
   axe,
@@ -773,8 +975,11 @@ function EcranPlanning({
   dateAffichee,
   setDateAffichee,
   options,
+  creneauOuvert,
+  setCreneauOuvert,
+  validation,
+  onProbleme,
 }) {
-  const [creneauOuvert, setCreneauOuvert] = useState(null);
 
   /* Deux plannings possibles : le planning type d'un jour de la semaine (la
      référence, ce qui tourne quand tout le monde est là) et une journée datée
@@ -886,6 +1091,25 @@ function EcranPlanning({
         </Bandeau>
       )}
 
+      {(() => {
+        /* Les erreurs de la structure elle-même — celles qui viennent d'un
+           import. Cliquer une ligne ouvre le créneau fautif : sans ça, une
+           liste d'erreurs ne dit pas où aller. */
+        const aCorriger = (validation?.problemes ?? []).filter(
+          (p) => p.gravite === 'erreur' && creneauDuChemin(p.chemin) !== null,
+        );
+        if (aCorriger.length === 0) return null;
+        return (
+          <Carte
+            className="no-print"
+            titre={`${aCorriger.length} créneau(x) à corriger`}
+            sousTitre="Cliquez une ligne pour ouvrir le créneau concerné"
+          >
+            <ListeProblemes problemes={aCorriger} onProbleme={onProbleme} />
+          </Carte>
+        );
+      })()}
+
       {conflits.length > 0 && (
         <Bandeau ton="alerte" icone={CircleAlert} titre={`${conflits.length} créneau(x) sans solution`}>
           {conflits.map((c) => (
@@ -988,10 +1212,13 @@ function EcranPlanning({
       {creneauOuvert && (
         <DetailCreneau
           referentiel={referentiel}
+          structure={structure}
+          setStructure={setStructure}
           planning={planning}
           creneauId={creneauOuvert}
           violations={violations.filter((v) => v.creneaux.includes(creneauOuvert))}
           conflit={conflits.find((c) => c.creneauId === creneauOuvert)}
+          modifiable={!montreReparation}
           onFermer={() => setCreneauOuvert(null)}
         />
       )}
@@ -1741,8 +1968,10 @@ function EcranRegles({ referentiel, structure, setStructure, validation }) {
 }
 
 /* ==================== Écran Structure ====================
-   Lecture seule : le fichier reste la source. On regarde ce qui a été chargé,
-   on ne le retape pas ici. */
+   Lecture, sauf les salles. Le fichier reste la source de ce qui vient de lui —
+   on ne retape pas ici un planning entier. Mais les salles, elles, ne viennent
+   d'aucun fichier : un planning de tableur ne les nomme jamais. Elles n'ont
+   donc pas d'autre endroit où exister. */
 
 function Table({ colonnes, lignes }) {
   return (
@@ -1783,7 +2012,107 @@ function semaineEnTexte(semaine) {
   return entrees.map(([jour, p]) => `${jour.slice(0, 3)} ${p.debut}–${p.fin}`).join(' · ');
 }
 
-function EcranStructure({ referentiel, structure }) {
+/* Les salles ne viennent presque jamais du tableur : un planning manuscrit ne
+   les nomme pas. C'est le seul endroit où on les saisit, et sans elles l'axe
+   « par salle » de la grille n'a rien à montrer. */
+function CarteSalles({ structure, setStructure }) {
+  const [nom, setNom] = useState('');
+  const [capacite, setCapacite] = useState('6');
+
+  const ajouter = () => {
+    if (!nom.trim()) return;
+    setStructure(ajouteSalle(structure, { nom: nom.trim(), capacite: Math.max(0, Number(capacite) || 0) }));
+    setNom('');
+  };
+
+  const supprimer = (salle) => {
+    const dessus = structure.planningType.filter((c) => c.salleId === salle.id).length;
+    const avertissement = dessus > 0 ? `\n\n${dessus} créneau(x) s’y tiennent : ils se retrouveront sans salle.` : '';
+    if (!window.confirm(`Supprimer « ${salle.nom} » ?${avertissement}`)) return;
+    setStructure(supprimeSalle(structure, salle.id));
+  };
+
+  return (
+    <Carte titre={`Salles (${structure.salles.length})`} sousTitre="Elles se saisissent ici, pas dans le tableur">
+      {structure.salles.length === 0 ? (
+        <Vide>Aucune salle. Sans elles, la grille « par salle » et les règles de salle n’ont rien à dire.</Vide>
+      ) : (
+        <div className="space-y-1.5">
+          {structure.salles.map((salle) => (
+            <div
+              key={salle.id}
+              className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm"
+              style={{ borderColor: 'var(--border)' }}
+            >
+              <input
+                className="min-w-0 flex-1 rounded-lg border px-2 py-1 text-sm"
+                style={styleSaisie}
+                value={salle.nom}
+                aria-label={`Nom de ${salle.nom}`}
+                onChange={(e) => setStructure(modifieSalle(structure, salle.id, { nom: e.target.value }))}
+              />
+              <input
+                type="number"
+                min="0"
+                className="w-20 rounded-lg border px-2 py-1 text-sm"
+                style={styleSaisie}
+                value={salle.capacite}
+                aria-label={`Capacité de ${salle.nom}`}
+                onChange={(e) =>
+                  setStructure(modifieSalle(structure, salle.id, { capacite: Math.max(0, Number(e.target.value) || 0) }))
+                }
+              />
+              <span className="text-xs" style={{ color: 'var(--ink-soft)' }}>
+                places
+              </span>
+              <button
+                type="button"
+                onClick={() => supprimer(salle)}
+                aria-label={`Supprimer ${salle.nom}`}
+                className="rounded-lg border p-1"
+                style={{ borderColor: 'var(--border)', color: 'var(--crisis)' }}
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-3 flex items-end gap-2">
+        <div className="flex-1">
+          <Champ libelle="Nouvelle salle">
+            <input
+              className="w-full rounded-xl border px-3 py-2 text-sm"
+              style={styleSaisie}
+              value={nom}
+              placeholder="Salle sensorielle"
+              onChange={(e) => setNom(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && ajouter()}
+            />
+          </Champ>
+        </div>
+        <div className="w-24">
+          <Champ libelle="Places">
+            <input
+              type="number"
+              min="0"
+              className="w-full rounded-xl border px-3 py-2 text-sm"
+              style={styleSaisie}
+              value={capacite}
+              onChange={(e) => setCapacite(e.target.value)}
+            />
+          </Champ>
+        </div>
+        <Bouton variante="primaire" icone={Plus} onClick={ajouter} disabled={!nom.trim()}>
+          Ajouter
+        </Bouton>
+      </div>
+    </Carte>
+  );
+}
+
+function EcranStructure({ referentiel, structure, setStructure }) {
   const s = structure;
   return (
     <div className="space-y-4">
@@ -1836,12 +2165,7 @@ function EcranStructure({ referentiel, structure }) {
       </Carte>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Carte titre={`Salles (${s.salles.length})`}>
-          <Table
-            colonnes={['nom', 'capacité', 'tags']}
-            lignes={s.salles.map((sa) => [sa.nom, sa.capacite, (sa.tags ?? []).join(', ') || '—'])}
-          />
-        </Carte>
+        <CarteSalles structure={s} setStructure={setStructure} />
         <Carte titre={`Groupes (${s.groupes.length})`}>
           <Table
             colonnes={['nom', 'éducateurs de référence', 'jeunes']}
@@ -2954,6 +3278,9 @@ export default function App() {
   const [jourAffiche, setJourAffiche] = useState(null);
   const [dateAffichee, setDateAffichee] = useState(null);
   const [axe, setAxe] = useState('salle');
+  /* Le créneau ouvert vit ici, pas dans l'écran Planning : une erreur de
+     validation cliquée depuis n'importe quel écran doit pouvoir l'ouvrir. */
+  const [creneauOuvert, setCreneauOuvert] = useState(null);
   const [sourcePlanning, setSourcePlanning] = useState('type');
 
   /* Toute écriture est relue avant d'être annoncée réussie : un setItem qui ne
@@ -3072,6 +3399,22 @@ export default function App() {
     [setStructure, setPeriode, periode.du],
   );
 
+  /* D'une erreur de validation au créneau fautif, ouvert dans l'éditeur. Il
+     faut recadrer l'écran avec : le créneau peut être un autre jour que celui
+     affiché, et une journée réparée ne se modifie pas. */
+  const ouvrirProbleme = useCallback(
+    (probleme) => {
+      const index = creneauDuChemin(probleme.chemin);
+      const creneau = index === null ? null : structure?.planningType[index];
+      if (!creneau) return;
+      setJourAffiche(creneau.jour);
+      setSourcePlanning('type');
+      setDestination('planning');
+      setCreneauOuvert(creneau.id);
+    },
+    [structure],
+  );
+
   const lancerAnalyse = useCallback(() => {
     if (!referentiel) return;
     try {
@@ -3175,6 +3518,8 @@ export default function App() {
     contenu = jourAffiche ? (
       <EcranPlanning
         referentiel={referentiel}
+        structure={structure}
+        setStructure={setStructure}
         jourAffiche={jourAffiche}
         setJourAffiche={setJourAffiche}
         axe={axe}
@@ -3185,6 +3530,10 @@ export default function App() {
         dateAffichee={dateAffichee}
         setDateAffichee={setDateAffichee}
         options={options}
+        creneauOuvert={creneauOuvert}
+        setCreneauOuvert={setCreneauOuvert}
+        validation={validation}
+        onProbleme={ouvrirProbleme}
       />
     ) : (
       <Vide>La grille de cette structure ne déclare aucun jour d’accueil.</Vide>
@@ -3222,7 +3571,7 @@ export default function App() {
       />
     );
   } else if (destination === 'structure') {
-    contenu = <EcranStructure referentiel={referentiel} structure={structure} />;
+    contenu = <EcranStructure referentiel={referentiel} structure={structure} setStructure={setStructure} />;
   } else if (destination === 'fichiers') {
     contenu = ecranFichiers;
   } else {
