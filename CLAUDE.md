@@ -86,13 +86,18 @@ tests et n'est jamais importé depuis `interface/`.
   protègent un fichier en transit, pas son contenu pour qui a la phrase de passe.
   L'export en clair reste toujours disponible à côté : c'est lui le contrat lisible par
   un autre outil.
-- **Un CSV ne dit jamais où une cellule fusionnée s'arrête vraiment.** Un couloir qui ne
-  comporte plus rien après une cellule voit sa durée fermée sur la fin de journée
-  (`CreneauLu.finDeduite`) — ça peut arriver à n'importe quel couloir, pas seulement à
-  la dernière ligne du tableau. Un export réel a produit un créneau de 5 heures pour une
-  activité qui devait durer 30 minutes, qui a ensuite fait exploser la validation en
-  centaines d'erreurs `creneau.chevauchement` sans rapport apparent avec la cause. Le
-  signal `import.duree-incertaine` pointe désormais directement les créneaux concernés.
+- **Un CSV ne dit jamais où une cellule fusionnée s'arrête vraiment — et le repli doit
+  être minimal, pas maximal.** Un couloir qui ne comporte plus rien après une cellule
+  (`CreneauLu.finDeduite`) peut arriver à n'importe quel couloir, pas seulement à la
+  dernière ligne du tableau — typiquement un couloir de « décroché individuel » utilisé
+  une seule fois dans la journée pendant que les autres couloirs continuent de tourner.
+  Une première version fermait ce genre de créneau sur la fin de journée : sur un export
+  réel, une activité de 15 minutes est devenue un bloc de 5 heures, qui chevauchait
+  mécaniquement toutes les activités suivantes du même jeune dans d'autres couloirs —
+  plusieurs centaines de `creneau.chevauchement` sans rapport apparent avec la cause.
+  Signaler l'incertitude (`import.duree-incertaine`) ne suffit pas si le repli choisi est
+  le pire des deux extrêmes : la fin se replie maintenant sur la **prochaine borne de la
+  grille**, le minimum plausible, plutôt que sur la fermeture de journée.
 - **Un fichier déposé n'est pas forcément en UTF-8.** `decodeOctets`
   (`src/import/tableur.ts`) essaie l'UTF-8 strict, bascule sur windows-1252 sinon — un
   export Numbers/Excel réel a été trouvé encodé ainsi (confirmé par l'octet `0xE9` pour

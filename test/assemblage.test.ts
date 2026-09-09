@@ -141,6 +141,33 @@ describe('assemblage depuis zéro', () => {
     assert.ok(problemes.some((p) => p.code === 'import.creneau' && p.message.includes('Repas')));
   });
 
+  it('replie un couloir jamais réutilisé sur le prochain créneau, pas sur la fin de journée', () => {
+    // « Protocole » (col2, 9h30) ne réapparaît plus dans son couloir pour le
+    // reste du fichier, alors que d'autres couloirs continuent (Mand à
+    // 10h30, Repas à 11h) : sa durée se replie sur le pas de grille suivant
+    // (1 pas de 30 min), pas sur la fermeture de journée (4 pas) — ce qui
+    // évite de le faire chevaucher artificiellement Mand et Repas.
+    const { structure, problemes } = assemble(lu, {
+      correspondances,
+      metaDepart: { auteur: 'Test', etablissement: 'IME Test' },
+    });
+    const protocole = structure.planningType.find((c) => {
+      const nom = structure.activites.find((a) => a.id === c.activiteId)?.nom;
+      return nom === 'Protocole';
+    })!;
+    assert.equal(protocole.pas, 1);
+    assert.ok(
+      problemes.some((p) => p.code === 'import.duree-incertaine' && p.message.includes('Protocole')),
+    );
+
+    const resultat = valideStructure(structure);
+    assert.deepEqual(
+      resultat.problemes.filter((p) => p.gravite === 'erreur' && p.code === 'creneau.chevauchement'),
+      [],
+      'aucun chevauchement artificiel introduit par le repli de durée',
+    );
+  });
+
   it('ignore un nom classé "ignorer" sans planter', () => {
     const c2 = correspondances.map((x) => (x.nom === 'Pike' ? { ...x, cible: 'ignorer' as const } : x));
     const { structure } = assemble(lu, {

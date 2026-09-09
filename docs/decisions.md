@@ -403,12 +403,38 @@ fichier ne tombe pas par chance sur un multiple du pas.
 
 **Une ambiguïté restante, assumée et signalée plutôt que résolue.** Un CSV ne peut pas
 distinguer « cette cellule fusionnée s'arrête ici, suivie de cellules vides » de
-« fusionnée jusqu'à la fin de la feuille » — les deux ressortent identiques à l'export.
-Quand un couloir ne comporte plus rien après une cellule, sa durée est déduite de la
-fermeture de journée (`CreneauLu.finDeduite: true`) et signalée précisément
-(`import.duree-incertaine`), créneau par créneau — plutôt qu'une remarque générique qui
-ne visait que la toute dernière ligne du tableau, comme avant ce correctif. Sur le
-fichier réel, cette ambiguïté produit ensuite de vrais chevauchements en validation
-(un couloir étiré sur 5 heures percute forcément d'autres créneaux) : c'est la
-validation qui fait son travail, pas un bug à corriger côté import — deviner une durée
-plus courte serait inventer une donnée que le fichier ne contient pas.
+« fusionnée plus loin » — les deux ressortent identiques à l'export. Quand un couloir ne
+comporte plus rien après une cellule, sa durée est signalée précisément
+(`CreneauLu.finDeduite: true`, `import.duree-incertaine`), créneau par créneau — plutôt
+qu'une remarque générique qui ne visait que la toute dernière ligne du tableau, comme
+avant ce correctif. Le repli lui-même (fermeture de journée, puis borne suivante) a
+changé : voir §12.
+
+## 12. Le repli d'une durée incertaine doit être minimal, pas maximal
+
+§11 fermait un couloir `finDeduite` sur la fin de journée, en jugeant que le
+chevauchement de validation qui en résultait était « la validation qui fait son
+travail ». Retesté sur le même fichier réel après correction des bugs A–D, ce choix
+s'est révélé être le pire des deux extrêmes plutôt qu'un simple signal : un couloir de
+« décroché individuel » (une activité à un jeune, hors du collectif) qui n'est réutilisé
+qu'une fois dans la journée devient un bloc de plusieurs heures, qui chevauche
+mécaniquement *toutes* les activités suivantes du même jeune dans d'autres couloirs —
+plusieurs centaines de `creneau.chevauchement`, noyant les quelques vrais conflits de
+données sous un bruit sans rapport avec eux.
+
+La durée réelle reste tout aussi inconnue qu'avant — rien ne permet de la déduire du
+CSV — mais entre deux inconnues, choisir la plus courte est le choix le moins
+dommageable : elle minimise le risque de chevauchement inventé, quand la maximiser le
+garantissait presque. Le repli est donc désormais la **prochaine borne de la grille**
+(un seul pas), pas la fermeture de journée. `finDeduite` reste `true` et
+`import.duree-incertaine` reste posé dans les deux cas : le signal ne change pas, seule
+la valeur choisie en son absence change. Une durée sous-estimée reste visible et
+corrigible à la main depuis l'écran de correspondance ; une durée sur-estimée bloquait
+la validation entière du fichier.
+
+Vérifié sur le même fichier réel (jamais committé) : les erreurs `creneau.chevauchement`
+tombent d'environ 570 à 154 lignes, qui se ramènent à **8 paires de créneaux** réellement
+en collision dans les données sources (des jeunes affectés deux fois au même moment,
+comme au §11) — plus une seule fois chacune par pas de 5 minutes de leur recouvrement.
+Ce ne sont plus des artefacts du repli : ce sont les vrais conflits que la validation est
+censée trouver.
