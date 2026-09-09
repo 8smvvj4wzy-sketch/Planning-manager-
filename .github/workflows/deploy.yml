@@ -52,6 +52,14 @@ jobs:
 
   deploy:
     needs: build
+    # Seule `main` publie. L'environnement `github-pages` refuse de toute façon
+    # un déploiement venu d'une autre branche (« Branch is not allowed to deploy
+    # to github-pages due to environment protection rules ») : sans ce garde-fou,
+    # chaque branche de travail affichait un contrôle rouge qui ne voulait rien
+    # dire — et un rouge permanent finit par se lire comme du bruit, y compris
+    # le jour où il est vrai. Le vérificateur et le build, eux, tournent bien
+    # sur toutes les branches : c'est là qu'est le vrai signal.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
