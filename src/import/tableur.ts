@@ -26,8 +26,8 @@
  *    simultanees, sans identite fixe : un jeune peut decrocher du collectif
  *    pour une activite a lui, sur une duree qui n'est pas celle des autres ;
  *  - une cellule fusionnee sur plusieurs lignes ressort VIDE a l'export : un
- *    creneau court donc de sa ligne jusqu'a la prochaine cellule non vide de
- *    la meme colonne ;
+ *    creneau court donc de sa ligne jusqu'a la prochaine rangee qui porte
+ *    QUELQUE CHOSE, ou que ce soit dans le tableau (voir `rangeeMuette`) ;
  *  - une cellule peut nommer PLUSIEURS jeunes et PLUSIEURS educateurs a la
  *    fois (« Helena + Valentin / Camille+Callista ») : le signe `+` separe
  *    des personnes des DEUX cotes du `/`, pas seulement a droite.
@@ -357,20 +357,19 @@ export interface CreneauLu {
   /** Jour du groupe de colonnes auquel appartient ce couloir. */
   jour: Jour | null;
   debut: string;
-  /** Heure de fin, deduite de la prochaine cellule non vide du meme couloir. */
+  /** Heure de fin : la prochaine rangee qui porte quelque chose (voir `rangeeMuette`). */
   fin: string;
   /**
-   * `true` quand `fin` n'a pas ete trouvee dans le fichier — ce couloir ne
-   * comporte plus aucune cellule non vide apres celle-ci. Un CSV ne distingue
-   * pas « fusionne jusqu'ici puis vraiment vide » de « fusionne plus loin » :
-   * la fusion d'origine ne survit pas a l'export. Dans ce cas `fin` est repliee
+   * `true` quand `fin` n'a pas ete trouvee dans le fichier — plus aucune rangee
+   * ne porte quoi que ce soit apres celle-ci. Un CSV ne distingue pas
+   * « fusionne jusqu'ici puis vraiment vide » de « fusionne plus loin » : la
+   * fusion d'origine ne survit pas a l'export. Dans ce cas `fin` est repliee
    * sur la PROCHAINE borne de la grille, pas sur la fermeture de la journee —
    * un repli minimal plutot que maximal. Fermer sur la fin de journee a
    * produit, sur un fichier reel, des creneaux de 15 minutes gonfles a 5
    * heures, qui chevauchaient mecaniquement toutes les activites suivantes du
-   * meme jeune dans d'autres couloirs (des centaines de `creneau.chevauchement`
-   * sans rapport apparent avec la cause). Peut arriver a n'importe quel
-   * couloir, pas seulement a celui de la toute derniere ligne.
+   * meme jeune (des centaines de `creneau.chevauchement` sans rapport apparent
+   * avec la cause).
    */
   finDeduite: boolean;
   activite: string;
@@ -396,11 +395,37 @@ export interface PlanningLu {
 }
 
 /**
+ * Une rangee MUETTE ne porte aucune cellule non vide, sa propre heure exclue.
+ *
+ * C'est un artefact de tableur, pas une borne : une cellule fusionnee sur
+ * plusieurs lignes laisse derriere elle des lignes de grille qui gardent leur
+ * heure et rien d'autre. Un « 10h » ainsi seul ne dit pas que la journee change
+ * a 10h, il dit que la ligne existe. Toute autre rangee, elle, porte au moins
+ * une chose nouvelle quelque part : l'emploi du temps y a avance, et ce qui
+ * precedait s'y arrete.
+ *
+ * C'est ce qui distingue « fusionne, ca continue » de « ce couloir ne sert plus
+ * mais la journee, si ». Chercher a la place la prochaine cellule non vide du
+ * MEME couloir etirait un creneau sur tout l'intervalle ou son couloir restait
+ * inutilise — « Protocole : Adiyan » de 9h30 a 13h10 sur un fichier reel, la
+ * ou l'accueil d'a cote durait une heure. Voir docs/decisions.md §13.
+ */
+function rangeesMuettes(
+  table: readonly (readonly string[])[],
+  rangees: readonly { ligne: number; heure: string }[],
+  colonneHeures: number,
+): boolean[] {
+  return rangees.map((r) =>
+    (table[r.ligne] ?? []).every((cellule, col) => col === colonneHeures || cellule.trim() === ''),
+  );
+}
+
+/**
  * Lit un tableau decoupe.
  *
- * La duree du dernier creneau de chaque couloir n'est pas dans le fichier : la
- * derniere ligne n'a pas de ligne suivante pour la borner. On la clot a la fin
- * de la journee, et on le dit dans `remarques` plutot que de le taire.
+ * La duree du dernier creneau n'est pas dans le fichier : la derniere rangee
+ * qui porte quelque chose n'a rien apres elle pour la borner. On la replie sur
+ * la borne suivante, et on le dit dans `remarques` plutot que de le taire.
  */
 export function litPlanning(table: readonly (readonly string[])[]): PlanningLu {
   const remarques: string[] = [];
@@ -452,6 +477,7 @@ export function litPlanning(table: readonly (readonly string[])[]): PlanningLu {
   }
 
   const largeur = Math.max(0, ...table.map((l) => l.length));
+  const muettes = rangeesMuettes(table, rangees, colonneHeures);
   const creneaux: CreneauLu[] = [];
 
   for (let col = 0; col < largeur; col++) {
@@ -463,15 +489,13 @@ export function litPlanning(table: readonly (readonly string[])[]): PlanningLu {
       const cellule = analyseCellule(brut);
       if (!cellule) continue;
 
-      // Cellule fusionnee : elle court jusqu'a la prochaine rangee dont la
-      // cellule de ce couloir est non vide. Si ce couloir ne comporte plus
-      // rien ensuite (`finDeduite`), le repli est la PROCHAINE borne de la
-      // grille — le minimum plausible, pas la fermeture de journee (le
-      // maximum) : voir le commentaire de `CreneauLu.finDeduite`.
+      // Cellule fusionnee : elle court jusqu'a la prochaine rangee qui porte
+      // quelque chose. Les rangees muettes ne bornent rien, elles sont
+      // traversees. Si plus rien ne suit (`finDeduite`), le repli est la
+      // PROCHAINE borne de la grille — le minimum plausible, pas la fermeture
+      // de journee : voir le commentaire de `CreneauLu.finDeduite`.
       let suivante = r + 1;
-      while (suivante < rangees.length && (table[rangees[suivante]!.ligne]?.[col] ?? '').trim() === '') {
-        suivante++;
-      }
+      while (suivante < rangees.length && muettes[suivante]) suivante++;
       const finTrouvee = suivante < rangees.length;
 
       creneaux.push({
@@ -496,18 +520,16 @@ export function litPlanning(table: readonly (readonly string[])[]): PlanningLu {
     );
   }
 
-  // Un couloir qui ne comporte plus rien apres une cellule voit sa duree
-  // repliee sur la PROCHAINE borne de la grille — un CSV ne distingue pas ca
-  // d'une vraie fusion plus longue. Ca peut arriver a n'importe quel couloir,
-  // pas seulement a la derniere ligne : compte precis plutot qu'une phrase
-  // generique qui laisserait croire que seule la toute derniere cellule est
-  // concernee.
+  // Les cellules posees sur la derniere rangee qui porte quelque chose n'ont
+  // rien apres elles pour les borner : leur duree est repliee sur la prochaine
+  // borne de la grille — un CSV ne distingue pas ca d'une vraie fusion plus
+  // longue.
   const dureeIncertaine = creneaux.filter((c) => c.finDeduite && c.debut !== c.fin);
   if (dureeIncertaine.length > 0) {
     remarques.push(
       `${dureeIncertaine.length} creneau(x) sont replies sur le prochain creneau de la grille ` +
-        "faute de cellule suivante dans leur couloir : leur duree reelle est peut-etre plus longue, " +
-        'a verifier.',
+        "faute de rangee suivante qui porte quelque chose : leur duree reelle est peut-etre plus " +
+        'longue, a verifier.',
     );
   }
 

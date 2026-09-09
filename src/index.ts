@@ -27,6 +27,7 @@ export {
 
 export {
   chargeStructure,
+  estChargeable,
   formate,
   valideJour,
   validePeriode,

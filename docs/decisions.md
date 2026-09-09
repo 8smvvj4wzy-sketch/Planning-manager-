@@ -438,3 +438,69 @@ en collision dans les données sources (des jeunes affectés deux fois au même 
 comme au §11) — plus une seule fois chacune par pas de 5 minutes de leur recouvrement.
 Ce ne sont plus des artefacts du repli : ce sont les vrais conflits que la validation est
 censée trouver.
+
+## 13. Une cellule fusionnée s'arrête quand la journée avance, pas quand sa colonne se remplit
+
+§12 avait corrigé le repli d'une durée inconnue, mais laissé intacte la règle principale :
+un créneau courait jusqu'à la prochaine cellule non vide **du même couloir**. Sur le
+fichier réel, ça restait faux, et l'utilisateur l'a formulé exactement : « si une activité
+est marquée à 9h30, c'est qu'elle dure jusqu'au prochain créneau ».
+
+Le défaut est le même qu'au §12, à un cran de moins : un couloir peut rester vide
+longtemps sans que l'activité qui le précédait dure jusque-là. Il ne sert simplement plus
+— le jeune a rejoint le collectif — pendant que la journée continue dans les colonnes
+voisines. « Protocole : Adiyan » posé à 9h30 s'étirait ainsi jusqu'à 13h10, trois heures
+quarante, là où l'accueil d'à côté durait une heure.
+
+Ce qui distingue les deux cas est dans le fichier, mais pas là où on le cherchait. Une
+cellule fusionnée sur plusieurs lignes laisse derrière elle des rangées qui gardent leur
+heure et **rien d'autre, nulle part** — un trait de grille. La ligne « 10h » du fichier
+réel est vide sur les vingt-quatre colonnes des cinq jours. Une rangée qui porte quelque
+chose, où que ce soit, dit au contraire que l'emploi du temps a avancé : ce qui précédait
+s'y arrête. D'où la règle : **un créneau court jusqu'à la prochaine rangée non muette**,
+et les rangées muettes sont traversées (`rangeesMuettes`, `src/import/tableur.ts`).
+
+Trois règles ont été mesurées sur le fichier réel avant de trancher :
+
+| règle d'extension | erreurs | conflits distincts |
+|---|---|---|
+| prochaine cellule non vide du même couloir (§12) | 154 | 8 |
+| prochaine rangée non vide du même jour | 206 | 3 |
+| **prochaine rangée non muette, tout le tableau** | **66** | **3** |
+
+La deuxième échoue sur le mercredi, dont l'après-midi n'est pas détaillé : « vide sur tout
+le jour » y devient à tort « toujours fusionné », et trois créneaux de midi s'étirent
+jusqu'à 15h30. La troisième garde les vraies fusions (« Accueil » 9h30 → 10h30, traversant
+la ligne « 10h » muette) et coupe les fausses.
+
+Les trois conflits restants ne sont pas des artefacts de lecture : deux sont l'alternance
+**Semaine A / Semaine B** du mercredi, écrite dans une seule cellule — les mêmes jeunes y
+figurent deux fois parce que ce sont des alternatives, et le modèle n'a pas la notion de
+semaine paire/impaire. Le troisième est une vraie double affectation (une éducatrice sur
+deux activités le jeudi à 14h30). C'est ce que la validation est censée trouver.
+
+**Ce que la règle coûte.** Une vraie fusion longue dans un couloir, pendant que le couloir
+voisin tourne vite, sera coupée trop tôt. Le fichier réel n'en contient pas, mais un autre
+le pourrait. Le compromis est délibéré et asymétrique : une durée sous-estimée laisse un
+trou visible dans la grille, corrigible d'un clic ; une durée sur-estimée invente des
+chevauchements en cascade et bloquait la validation entière.
+
+## 14. Une erreur de cohérence n'empêche plus de charger — une erreur de forme, si
+
+L'application refusait tout chargement tant que `valideStructure` rendait la moindre
+erreur. Sur un planning réel, qui comporte presque toujours de vraies collisions, ça
+revenait à dire : corrigez votre tableur à l'aveugle, vous verrez la grille après.
+L'utilisateur l'a dit sans détour — « l'app est inutilisable, je ne peux rien faire ».
+
+`estChargeable` (`src/validation/index.ts`) trace la ligne au bon endroit :
+
+- **la forme bloque.** Un fichier qui viole le JSON Schema n'a pas les champs sur lesquels
+  le reste de l'application compte (`meta.version`, un `jour` qui est bien un jour). Le
+  charger ne donnerait pas un planning à corriger, mais un écran blanc et une exception.
+- **la cohérence ne bloque pas.** Chevauchements, références croisées, capacités : ce sont
+  exactement les problèmes qu'on veut voir *dans* la grille pour les corriger. Ils restent
+  affichés, comptés, et le message de chargement les annonce.
+
+Le moteur, lui, n'avait pas besoin d'être changé : l'interface construit déjà
+`new Referentiel(structure)` directement, sans passer par `chargeStructure` qui lève. Un
+chevauchement n'est pas une corruption — c'est un conflit, et un conflit s'affiche.

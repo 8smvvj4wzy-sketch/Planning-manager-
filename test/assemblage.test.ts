@@ -141,13 +141,13 @@ describe('assemblage depuis zéro', () => {
     assert.ok(problemes.some((p) => p.code === 'import.creneau' && p.message.includes('Repas')));
   });
 
-  it('replie un couloir jamais réutilisé sur le prochain créneau, pas sur la fin de journée', () => {
-    // « Protocole » (col2, 9h30) ne réapparaît plus dans son couloir pour le
-    // reste du fichier, alors que d'autres couloirs continuent (Mand à
-    // 10h30, Repas à 11h) : sa durée se replie sur le pas de grille suivant
-    // (1 pas de 30 min), pas sur la fermeture de journée (4 pas) — ce qui
-    // évite de le faire chevaucher artificiellement Mand et Repas.
-    const { structure, problemes } = assemble(lu, {
+  it('n étire pas un créneau sur l intervalle où son couloir reste vide', () => {
+    // « Protocole » (col2, 9h30) est seul dans son couloir, qui reste vide
+    // ensuite. Il s'arrête quand même à 10h30, parce que la rangée de 10h30
+    // apporte « Mand » : la journée y a avancé. L'étirer jusqu'au bout du
+    // fichier double-affecterait Lumen et Brise sur Mand puis sur Repas —
+    // c'était le mécanisme des centaines de chevauchements du fichier réel.
+    const { structure } = assemble(lu, {
       correspondances,
       metaDepart: { auteur: 'Test', etablissement: 'IME Test' },
     });
@@ -155,16 +155,14 @@ describe('assemblage depuis zéro', () => {
       const nom = structure.activites.find((a) => a.id === c.activiteId)?.nom;
       return nom === 'Protocole';
     })!;
-    assert.equal(protocole.pas, 1);
-    assert.ok(
-      problemes.some((p) => p.code === 'import.duree-incertaine' && p.message.includes('Protocole')),
-    );
+    assert.equal(protocole.debut, '09:30');
+    assert.equal(protocole.pas, 2, '9h30 → 10h30, soit 2 pas de 30 minutes');
 
     const resultat = valideStructure(structure);
     assert.deepEqual(
       resultat.problemes.filter((p) => p.gravite === 'erreur' && p.code === 'creneau.chevauchement'),
       [],
-      'aucun chevauchement artificiel introduit par le repli de durée',
+      'aucun chevauchement artificiel introduit par la durée déduite',
     );
   });
 

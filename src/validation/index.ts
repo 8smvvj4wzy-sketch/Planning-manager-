@@ -43,6 +43,27 @@ export function validePeriode(ref: Referentiel, donnees: unknown): Resultat {
 }
 
 /**
+ * Un fichier dont la FORME tient peut etre charge, meme s'il porte des erreurs
+ * de coherence — et il faut qu'il le puisse.
+ *
+ * Un planning reel en contient presque toujours : deux activites qui se
+ * chevauchent, un educateur nomme a deux endroits a la fois. Ce sont
+ * precisement les erreurs qu'on veut voir et corriger DANS l'application ;
+ * refuser de charger tant qu'elles restent condamne l'utilisateur a corriger
+ * son tableur a l'aveugle, sans jamais voir la grille. C'est exactement ce qui
+ * a rendu l'application inutilisable sur le premier fichier reel.
+ *
+ * La forme, elle, ne se negocie pas : un fichier qui viole le JSON Schema n'a
+ * pas les champs sur lesquels le reste de l'application compte (`meta.version`,
+ * un `jour` qui est bien un jour). Le charger ne donnerait pas un planning a
+ * corriger, mais un ecran blanc et une exception. D'ou la ligne : la forme
+ * bloque, la coherence non.
+ */
+export function estChargeable(resultat: Resultat): boolean {
+  return !resultat.problemes.some((p) => p.gravite === 'erreur' && p.code.startsWith('schema.'));
+}
+
+/**
  * Charge une structure validee. Leve si le fichier comporte des erreurs :
  * les avertissements, eux, sont retournes a l'appelant.
  */

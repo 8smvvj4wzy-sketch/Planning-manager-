@@ -260,13 +260,16 @@ describe('lecture d un planning à un seul jour', () => {
     assert.equal(accueil.fin, '10:30');
   });
 
-  it('traite chaque colonne comme un couloir indépendant', () => {
-    // Le protocole de 9h30 court jusqu'à sa prochaine cellule non vide, à
-    // 13h10 — indépendamment de ce que fait le couloir d'à côté.
+  it('arrête un créneau dès qu une rangée porte quelque chose, fût-ce ailleurs', () => {
+    // Le protocole de 9h30 est seul dans son couloir : celui-ci reste vide
+    // jusqu'à 13h10. Ce n'est pas pour autant qu'il dure jusque-là — la rangée
+    // de 10h30 apporte « Mand » et « Détaché », donc la journée a avancé et le
+    // protocole s'arrête là. Chercher la prochaine cellule du même couloir
+    // l'étirait sur 3h40 (le bug du fichier réel).
     const protocoles = lu.creneaux.filter((c) => c.activite === 'Protocole');
     assert.equal(protocoles.length, 2);
     assert.equal(protocoles[0]!.debut, '09:30');
-    assert.equal(protocoles[0]!.fin, '13:10');
+    assert.equal(protocoles[0]!.fin, '10:30');
     assert.equal(protocoles[1]!.debut, '13:10');
     assert.notEqual(protocoles[0]!.couloir, lu.creneaux.find((c) => c.activite === 'Accueil')!.couloir);
   });
@@ -286,15 +289,13 @@ describe('lecture d un planning à un seul jour', () => {
     assert.equal(repas.fin, '12:10');
   });
 
-  it('replie un couloir jamais réutilisé sur le prochain créneau de la grille, pas sur la fin de journée', () => {
-    // « Détaché » à 10h30 ne réapparaît plus jamais dans son couloir alors que
-    // d'autres couloirs continuent (le protocole tourne jusqu'à 13h10) : sa fin
-    // se replie sur la borne suivante (11h), pas sur la fermeture de journée
-    // (15h30) — un repli minimal, pas maximal.
-    const detache = lu.creneaux.find((c) => c.activite === 'Détaché')!;
-    assert.equal(detache.debut, '10:30');
-    assert.equal(detache.fin, '11:00');
-    assert.equal(detache.finDeduite, true);
+  it('traverse une rangée muette sans s y arrêter', () => {
+    // La rangée « 10h » ne porte rien nulle part : c'est un trait de grille à
+    // l'intérieur de la cellule fusionnée de l'accueil, pas une borne. Le
+    // créneau la traverse et va jusqu'à 10h30.
+    const accueil = lu.creneaux.find((c) => c.activite === 'Accueil')!;
+    assert.equal(accueil.fin, '10:30');
+    assert.equal(accueil.finDeduite, false);
   });
 
   it('dit ce qu il a dû supposer', () => {
@@ -384,6 +385,31 @@ describe('lecture d un planning à plusieurs jours', () => {
     const noms = nomsRencontres(lu);
     assert.deepEqual(noms.jeunes, ['Onyx', 'Sable', 'Pike', 'Brise']);
     assert.deepEqual(noms.educateurs, ['Wren', 'Lumen']);
+  });
+});
+
+describe('durée de la dernière cellule (finDeduite)', () => {
+  /* Après 11h, plus aucune rangée ne porte quoi que ce soit : « Sieste » n'a
+     rien pour la borner. Les rangées 11h15 et 12h existent (elles portent une
+     heure) mais sont muettes. */
+  const lu = litPlanning([
+    ['', 'Vendredi', ''],
+    ['9h30', 'Accueil :\nOnyx / Wren', ''],
+    ['11h', 'Sieste :\nOnyx / Wren', ''],
+    ['11h15', '', ''],
+    ['12h', '', ''],
+  ]);
+
+  it('replie sur la borne suivante, pas sur la fermeture de la journée', () => {
+    const sieste = lu.creneaux.find((c) => c.activite === 'Sieste')!;
+    assert.equal(sieste.finDeduite, true);
+    assert.equal(sieste.fin, '11:15', 'la borne juste après, le minimum plausible');
+    assert.equal(lu.fin, '12:00');
+    assert.notEqual(sieste.fin, lu.fin, 'fermer sur la fin de journée gonflerait le créneau');
+  });
+
+  it('le signale plutôt que de le taire', () => {
+    assert.ok(lu.remarques.some((r) => r.includes('replies sur le prochain creneau')));
   });
 });
 

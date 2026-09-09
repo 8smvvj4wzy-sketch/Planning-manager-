@@ -364,9 +364,9 @@ export function assemble(planningLu: PlanningLu, options: OptionsAssemblage): Re
         avertissement(
           'import.duree-incertaine',
           `/planningType`,
-          `"${creneau.activite}" ${creneau.debut}–${creneau.fin} (${jour}) : ce couloir ne comporte plus ` +
-            'rien ensuite, la fin a ete repliee sur le prochain creneau de la grille — duree reelle ' +
-            'peut-etre plus longue, a verifier',
+          `"${creneau.activite}" ${creneau.debut}–${creneau.fin} (${jour}) : plus aucune rangee ne porte ` +
+            'quoi que ce soit ensuite, la fin a ete repliee sur le prochain creneau de la grille — ' +
+            'duree reelle peut-etre plus longue, a verifier',
         ),
       );
     }

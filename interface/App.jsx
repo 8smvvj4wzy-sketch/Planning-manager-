@@ -52,6 +52,7 @@ import {
   decodeOctets,
   decoupeTableau,
   educateursLibres,
+  estChargeable,
   estEnveloppeChiffree,
   etatJourNominal,
   jeunesSansAffectation,
@@ -502,6 +503,19 @@ const HAUTEUR_PAS = 34;
 function Grille({ referentiel, planning, axe, signalements, onCreneau }) {
   const colonnes = colonnesDe(referentiel, axe);
   const nbPas = referentiel.grille.nbPas;
+
+  /* Un axe sans colonne ne dessine rien — et une grille vide se lit comme une
+     application cassée. Un planning importé d'un tableur n'a aucune salle :
+     l'axe « par salle » y était muet, sans jamais dire pourquoi. */
+  if (colonnes.length === 0) {
+    const quoi = axe === 'salle' ? 'salle' : axe === 'educateur' ? 'éducateur actif' : 'jeune actif';
+    return (
+      <Vide>
+        Aucun{axe === 'salle' ? 'e' : ''} {quoi} dans cette structure : il n’y a rien à afficher sur cet axe.
+        {axe === 'salle' && ' Un planning importé depuis un tableur n’en nomme généralement pas — choisissez un autre axe, ou ajoutez les salles dans l’écran Structure.'}
+      </Vide>
+    );
+  }
 
   const blocs = [];
   for (const creneau of planning.creneaux) {
@@ -2054,10 +2068,25 @@ function ImportTableur({ referentiel, structure, onCharge }) {
     }
   };
 
+  /* Les erreurs de cohérence ne bloquent plus le chargement : c'est dans la
+     grille qu'on les corrige, pas dans le tableur d'origine. Seule une forme
+     cassée reste rédhibitoire — voir `estChargeable`. */
+  const erreursControle = resultatAssemblage
+    ? resultatAssemblage.controle.problemes.filter((p) => p.gravite === 'erreur')
+    : [];
+  const chargeable = resultatAssemblage ? estChargeable(resultatAssemblage.controle) : false;
+
   const charger = () => {
-    if (!resultatAssemblage || !resultatAssemblage.controle.valide) return;
+    if (!resultatAssemblage || !chargeable) return;
     onCharge(resultatAssemblage.structure);
-    setMessageFinal({ ton: 'succes', texte: 'Planning chargé.' });
+    setMessageFinal(
+      erreursControle.length > 0
+        ? {
+            ton: 'alerte',
+            texte: `Planning chargé avec ${erreursControle.length} erreur(s) à corriger dans l’écran Planning.`,
+          }
+        : { ton: 'succes', texte: 'Planning chargé.' },
+    );
     setTexte('');
     setLu(null);
     setResultatAssemblage(null);
@@ -2211,19 +2240,28 @@ function ImportTableur({ referentiel, structure, onCharge }) {
           <div className="space-y-3 rounded-xl border p-3" style={{ borderColor: 'var(--border)' }}>
             <Etiquette>Résultat de l’assemblage</Etiquette>
             {resultatAssemblage.problemes.length > 0 && <ListeProblemes problemes={resultatAssemblage.problemes} />}
-            {!resultatAssemblage.controle.valide ? (
-              <Bandeau ton="alerte" icone={AlertTriangle} titre="La structure assemblée n’est pas valide">
+            {erreursControle.length > 0 ? (
+              <Bandeau
+                ton="alerte"
+                icone={AlertTriangle}
+                titre={`${erreursControle.length} erreur(s) dans le planning assemblé`}
+              >
+                <p className="mb-2">
+                  {chargeable
+                    ? 'Un planning réel en comporte presque toujours : deux activités qui se chevauchent, quelqu’un affecté à deux endroits à la fois. Chargez-le quand même — c’est dans la grille qu’on les voit et qu’on les corrige, pas dans le tableur.'
+                    : 'Ce fichier ne respecte pas la forme attendue : il lui manque des champs sur lesquels l’application s’appuie. Il n’y a rien à corriger dans la grille tant que la forme ne tient pas.'}
+                </p>
                 <ListeProblemes problemes={resultatAssemblage.controle.problemes} />
               </Bandeau>
             ) : (
-              <>
-                {resultatAssemblage.controle.problemes.length > 0 && (
-                  <ListeProblemes problemes={resultatAssemblage.controle.problemes} />
-                )}
-                <Bouton variante="primaire" icone={Upload} onClick={charger}>
-                  Charger ce planning
-                </Bouton>
-              </>
+              resultatAssemblage.controle.problemes.length > 0 && (
+                <ListeProblemes problemes={resultatAssemblage.controle.problemes} />
+              )
+            )}
+            {chargeable && (
+              <Bouton variante="primaire" icone={Upload} onClick={charger}>
+                {erreursControle.length > 0 ? 'Charger quand même et corriger' : 'Charger ce planning'}
+              </Bouton>
             )}
           </div>
         )}
@@ -2278,10 +2316,11 @@ function EcranFichiers({
     }
 
     const resultat = valideStructure(donnees);
-    if (!resultat.valide) {
+    const erreurs = resultat.problemes.filter((p) => p.gravite === 'erreur');
+    if (!estChargeable(resultat)) {
       setMessageStructure({
         ton: 'alerte',
-        texte: `${nom} comporte ${resultat.problemes.filter((p) => p.gravite === 'erreur').length} erreur(s) — rien n’a été chargé.`,
+        texte: `${nom} ne respecte pas la forme attendue (${erreurs.length} erreur(s)) — rien n’a été chargé.`,
         problemes: resultat.problemes,
       });
       return;
@@ -2301,8 +2340,11 @@ function EcranFichiers({
     }
     chargerStructure(donnees);
     setMessageStructure({
-      ton: 'succes',
-      texte: `${nom} chargé (v${donnees.meta.version}).`,
+      ton: erreurs.length > 0 ? 'alerte' : 'succes',
+      texte:
+        erreurs.length > 0
+          ? `${nom} chargé (v${donnees.meta.version}) avec ${erreurs.length} erreur(s) à corriger.`
+          : `${nom} chargé (v${donnees.meta.version}).`,
       problemes: resultat.problemes,
     });
   };
@@ -2998,6 +3040,18 @@ export default function App() {
     if (!referentiel) return;
     const jours = referentiel.structure.grille.jours;
     setJourAffiche((actuel) => (actuel && jours.includes(actuel) ? actuel : (jours[0] ?? null)));
+  }, [referentiel]);
+
+  /* Même raison pour l'axe : « par salle » ne dessine rien sur un planning
+     importé d'un tableur, qui n'en nomme aucune. On retombe sur le premier axe
+     qui a de quoi s'afficher plutôt que d'ouvrir sur une grille vide. */
+  useEffect(() => {
+    if (!referentiel) return;
+    setAxe((actuel) =>
+      colonnesDe(referentiel, actuel).length > 0
+        ? actuel
+        : (AXES.map((a) => a.valeur).find((a) => colonnesDe(referentiel, a).length > 0) ?? actuel),
+    );
   }, [referentiel]);
 
   /* Une analyse porte sur une structure, une situation et un barème donnés :

@@ -86,18 +86,31 @@ tests et n'est jamais importé depuis `interface/`.
   protègent un fichier en transit, pas son contenu pour qui a la phrase de passe.
   L'export en clair reste toujours disponible à côté : c'est lui le contrat lisible par
   un autre outil.
-- **Un CSV ne dit jamais où une cellule fusionnée s'arrête vraiment — et le repli doit
-  être minimal, pas maximal.** Un couloir qui ne comporte plus rien après une cellule
-  (`CreneauLu.finDeduite`) peut arriver à n'importe quel couloir, pas seulement à la
-  dernière ligne du tableau — typiquement un couloir de « décroché individuel » utilisé
-  une seule fois dans la journée pendant que les autres couloirs continuent de tourner.
-  Une première version fermait ce genre de créneau sur la fin de journée : sur un export
-  réel, une activité de 15 minutes est devenue un bloc de 5 heures, qui chevauchait
-  mécaniquement toutes les activités suivantes du même jeune dans d'autres couloirs —
-  plusieurs centaines de `creneau.chevauchement` sans rapport apparent avec la cause.
-  Signaler l'incertitude (`import.duree-incertaine`) ne suffit pas si le repli choisi est
-  le pire des deux extrêmes : la fin se replie maintenant sur la **prochaine borne de la
-  grille**, le minimum plausible, plutôt que sur la fermeture de journée.
+- **Une cellule fusionnée s'arrête à la prochaine rangée qui porte quelque chose, pas à
+  la prochaine cellule de sa colonne.** Un couloir peut rester vide longtemps sans que
+  l'activité qui le précédait dure jusque-là : il ne sert simplement plus, pendant que la
+  journée continue à côté. Chercher la prochaine cellule non vide du *même* couloir
+  étirait « Protocole : Adiyan » de 9h30 à 13h10 sur un fichier réel, là où l'accueil
+  d'à côté durait une heure — et le même mécanisme produisait des centaines de
+  `creneau.chevauchement` sans rapport apparent avec la cause. Seule une rangée
+  **muette** (aucune cellule non vide nulle part, `rangeesMuettes` dans
+  `src/import/tableur.ts`) est traversée : c'est un trait de grille à l'intérieur d'une
+  cellule fusionnée, pas une borne. Sur le fichier réel : 154 erreurs et 8 conflits →
+  66 et 3. Voir `docs/decisions.md` §13.
+- **Le repli d'une durée inconnue est minimal, pas maximal.** Quand plus aucune rangée ne
+  porte quoi que ce soit après une cellule (`CreneauLu.finDeduite`), la fin se replie sur
+  la **prochaine borne de la grille**, jamais sur la fermeture de journée. Entre deux
+  durées également invérifiables, la plus courte est celle qui invente le moins de
+  chevauchements. Signaler l'incertitude (`import.duree-incertaine`) ne suffit pas si la
+  valeur choisie est le pire des deux extrêmes.
+- **Les erreurs de cohérence ne bloquent pas le chargement ; la forme, si.** Un planning
+  réel comporte presque toujours de vraies collisions — deux activités au même moment, un
+  éducateur nommé à deux endroits. Refuser de charger tant qu'elles restent condamnait
+  l'utilisateur à corriger son tableur à l'aveugle, sans jamais voir la grille : l'app
+  était littéralement inutilisable sur le premier fichier réel. `estChargeable`
+  (`src/validation/index.ts`) trace la ligne — un fichier qui viole le JSON Schema n'a pas
+  les champs dont le reste de l'application dépend et reste refusé, le reste se charge et
+  se corrige à l'écran.
 - **Un fichier déposé n'est pas forcément en UTF-8.** `decodeOctets`
   (`src/import/tableur.ts`) essaie l'UTF-8 strict, bascule sur windows-1252 sinon — un
   export Numbers/Excel réel a été trouvé encodé ainsi (confirmé par l'octet `0xE9` pour
