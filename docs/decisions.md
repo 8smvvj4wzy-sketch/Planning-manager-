@@ -279,3 +279,47 @@ identifiants ont pu changer de sens.
 Le stockage est local (`planning-ime:scenarios`), comme tout le reste. Une semaine gelée
 pèse quelques dizaines de Ko ; le repli IndexedDB ne se justifierait qu'au-delà de ~2 Mo
 cumulés, soit une centaine de scénarios. À surveiller, pas à anticiper.
+
+## 9. L'import depuis un tableur
+
+Le planning réel vit dans un tableur — Numbers, sur iPhone. Deux portes d'entrée :
+coller le contenu copié, ou déposer un fichier CSV/TSV exporté. Les deux passent par le
+même lecteur (`src/import/tableur.ts`), qui ne fait que découper et lire — il ne
+fabrique rien, il ne devine pas qui est jeune ou éducateur.
+
+**Trois propriétés du format ont guidé le lecteur**, déduites du planning réel envoyé en
+capture, pas supposées :
+
+- la première colonne porte les heures, et sert à retrouver la grille (voir décision 4) ;
+- les colonnes suivantes sont des couloirs d'activités simultanées, sans identité
+  fixe — confirmé : un jeune peut décrocher du collectif pour une activité à lui, sur
+  une durée qui n'est pas celle des autres ;
+- une cellule fusionnée sur plusieurs lignes ressort **vide** à l'export : un créneau
+  court donc de sa ligne jusqu'à la prochaine cellule non vide du même couloir.
+
+**Le lecteur ne tranche jamais qui est jeune et qui est éducateur.** Il rend les noms
+tels qu'ils sont écrits (`nomsRencontres`), et c'est un écran de correspondance qui les
+classe avant que quoi que ce soit ne soit chargé — un CSV dit « Marie Dupont », jamais
+`e1`. Les noms déjà connus dans la structure chargée sont pré-remplis par
+correspondance sur les initiales ou le prénom, accents et casse ignorés
+(`proposeCorrespondances`) ; les autres sont proposés comme nouveaux, avec un identifiant
+généré par `slugifie`.
+
+**Assembler, c'est fusionner dans une structure, jamais l'inventer d'un bloc.**
+`assemble()` (`src/import/assemblage.ts`) prend une lecture, un jour, des
+correspondances confirmées, et une structure de départ optionnelle :
+
+- avec une structure (`base`), le jour importé **remplace ses propres créneaux** s'il en
+  avait déjà, et les autres jours ne bougent pas — c'est ce qui rend « compléter la
+  semaine » possible sans dupliquer à chaque réimport du même jour ;
+- sans structure, tout repart de zéro avec ce seul jour — c'est le cas de la toute
+  première importation, sur une application vierge.
+
+Un créneau sans binôme nommé (une activité collective comme « Repas ») garde des listes
+`jeunes`/`educateurs` vides plutôt que d'inventer qui y participe : l'assembleur le
+signale (`import.creneau`), à compléter à la main. Une ligne de cellule qu'il n'a pas su
+lire comme un binôme (« Angie (pas dispo) ») est mise de côté dans `restes` et
+également signalée — jamais absorbée en silence.
+
+Le résultat assemblé passe par la **même validation** que n'importe quel fichier
+(`valideStructure`) avant d'être chargeable : rien ne contourne le contrat.

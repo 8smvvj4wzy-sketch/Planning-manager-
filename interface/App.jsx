@@ -39,16 +39,22 @@ import {
 } from 'lucide-react';
 
 import {
+  JOURS,
   Referentiel,
+  assemble,
   auditeJourNominal,
   calculDisponibilite,
   catalogue,
   comparePeriodes,
+  decoupeTableau,
   educateursLibres,
   etatJourNominal,
   jeunesSansAffectation,
+  litPlanning,
+  nomsRencontres,
   optionsAvec,
   planningTypeDuJour,
+  proposeCorrespondances,
   reparePeriode,
   sallesLibres,
   validePeriode,
@@ -1857,7 +1863,7 @@ function telecharger(nom, contenu) {
   URL.revokeObjectURL(url);
 }
 
-function ZoneDepot({ libelle, aide, onFichier }) {
+function ZoneDepot({ libelle, aide, onFichier, accept = 'application/json,.json' }) {
   const [survol, setSurvol] = useState(false);
   const entree = useRef(null);
 
@@ -1893,7 +1899,7 @@ function ZoneDepot({ libelle, aide, onFichier }) {
       <input
         ref={entree}
         type="file"
-        accept="application/json,.json"
+        accept={accept}
         className="hidden"
         onChange={(e) => {
           lire(e.target.files?.[0]);
@@ -1904,6 +1910,265 @@ function ZoneDepot({ libelle, aide, onFichier }) {
         <Bouton onClick={() => entree.current?.click()}>Choisir un fichier</Bouton>
       </div>
     </div>
+  );
+}
+
+/* ==================== Import depuis un tableur ====================
+   Coller le contenu copié depuis Numbers/Excel, ou déposer un fichier
+   CSV/TSV exporté. Trois étapes, dans l'ordre où elles peuvent échouer :
+   lecture du tableau, correspondance des noms, puis assemblage — chaque
+   étape montre ce qu'elle a compris avant de laisser passer à la suivante.
+   Rien n'est chargé avant que la structure assemblée ait été validée. */
+
+function LigneCorrespondance({ correspondance, onChange }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'var(--border)' }}>
+      <span className="w-40 shrink-0 truncate" style={{ color: 'var(--ink)', fontWeight: 600 }} title={correspondance.nom}>
+        {correspondance.nom}
+      </span>
+      {correspondance.existant && (
+        <Badge couleur={CAT_TEAL}>déjà connu</Badge>
+      )}
+      <div className="w-44">
+        <Selecteur
+          valeur={correspondance.cible}
+          onChange={(cible) => onChange({ ...correspondance, cible })}
+          options={[
+            { valeur: 'jeune', libelle: 'Jeune' },
+            { valeur: 'educateur', libelle: 'Éducateur' },
+            { valeur: 'ignorer', libelle: 'Ignorer' },
+          ]}
+        />
+      </div>
+      <code className="text-xs" style={{ fontFamily: F_MONO, color: 'var(--ink-soft)' }}>
+        {correspondance.cible === 'ignorer' ? '—' : correspondance.id}
+      </code>
+    </div>
+  );
+}
+
+function ImportTableur({ referentiel, structure, onCharge }) {
+  const [texte, setTexte] = useState('');
+  const [lu, setLu] = useState(null);
+  const [erreurLecture, setErreurLecture] = useState(null);
+  const [jourChoisi, setJourChoisi] = useState('');
+  const [mode, setMode] = useState('completer');
+  const [correspondances, setCorrespondances] = useState([]);
+  const [metaAuteur, setMetaAuteur] = useState('');
+  const [metaEtablissement, setMetaEtablissement] = useState('');
+  const [resultatAssemblage, setResultatAssemblage] = useState(null);
+  const [messageFinal, setMessageFinal] = useState(null);
+
+  const analyseTexte = (contenu) => {
+    setTexte(contenu);
+    setResultatAssemblage(null);
+    setMessageFinal(null);
+    try {
+      const table = decoupeTableau(contenu);
+      const planning = litPlanning(table);
+      setLu(planning);
+      setErreurLecture(null);
+
+      const guess = planning.titre
+        ? JOURS.find((j) => j.toLowerCase() === planning.titre.trim().toLowerCase())
+        : undefined;
+      setJourChoisi(guess ?? '');
+
+      const base = mode === 'completer' && structure ? referentiel : null;
+      setCorrespondances(proposeCorrespondances(base, nomsRencontres(planning)));
+    } catch (e) {
+      setLu(null);
+      setErreurLecture(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const majCorrespondance = (index, valeur) =>
+    setCorrespondances(correspondances.map((c, i) => (i === index ? valeur : c)));
+
+  const assembler = () => {
+    if (!lu || !jourChoisi) return;
+    try {
+      const options = {
+        jour: jourChoisi,
+        correspondances,
+        ...(mode === 'completer' && structure ? { base: structure } : {}),
+        ...(mode === 'remplacer' || !structure
+          ? { metaDepart: { auteur: metaAuteur, etablissement: metaEtablissement } }
+          : {}),
+      };
+      const resultat = assemble(lu, options);
+      const controle = valideStructure(resultat.structure);
+      setResultatAssemblage({ ...resultat, controle });
+      setMessageFinal(null);
+    } catch (e) {
+      setMessageFinal({ ton: 'alerte', texte: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
+  const charger = () => {
+    if (!resultatAssemblage || !resultatAssemblage.controle.valide) return;
+    onCharge(resultatAssemblage.structure);
+    setMessageFinal({ ton: 'succes', texte: 'Planning chargé.' });
+    setTexte('');
+    setLu(null);
+    setResultatAssemblage(null);
+  };
+
+  const remplace = mode === 'remplacer' || !structure;
+  const metaIncomplete = remplace && (!metaAuteur.trim() || !metaEtablissement.trim());
+  const pretAAssembler = lu && jourChoisi && !metaIncomplete;
+
+  return (
+    <Carte
+      titre="Importer depuis un tableur"
+      sousTitre="Coller le contenu copié depuis Numbers/Excel, ou déposer un fichier CSV/TSV exporté"
+    >
+      <div className="space-y-4">
+        <div>
+          <Champ libelle="Contenu collé" aide="Sélectionnez les cellules dans le tableur, copiez, collez ici.">
+            <textarea
+              className="w-full rounded-xl border px-3 py-2 font-mono text-xs"
+              style={{ ...styleSaisie, minHeight: '8rem' }}
+              value={texte}
+              onChange={(e) => analyseTexte(e.target.value)}
+              placeholder={'9h30\tAccueil :\nOnyx / Wren\n10h\t…'}
+            />
+          </Champ>
+          <div className="mt-2">
+            <ZoneDepot
+              libelle="…ou déposer un fichier CSV/TSV"
+              aide="Exporté depuis le tableur."
+              accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain"
+              onFichier={(contenu) => analyseTexte(contenu)}
+            />
+          </div>
+        </div>
+
+        {erreurLecture && (
+          <Bandeau ton="alerte" icone={AlertTriangle} titre="Lecture impossible">
+            {erreurLecture}
+          </Bandeau>
+        )}
+
+        {lu && (
+          <>
+            <div className="rounded-xl border p-3 text-sm" style={{ borderColor: 'var(--border)' }}>
+              <Etiquette>Ce qui a été lu</Etiquette>
+              <p className="mt-1" style={{ color: 'var(--ink)' }}>
+                {lu.creneaux.length} créneau(x), de {lu.debut} à {lu.fin}
+                {lu.titre ? ` — titre détecté : « ${lu.titre} »` : ''}
+              </p>
+              {lu.remarques.length > 0 && (
+                <ul className="mt-2 list-disc space-y-0.5 pl-5" style={{ color: 'var(--ink-soft)' }}>
+                  {lu.remarques.map((r, i) => (
+                    <li key={i}>{r}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="w-44">
+                <Champ libelle="Jour importé">
+                  <Selecteur
+                    valeur={jourChoisi}
+                    onChange={setJourChoisi}
+                    options={[{ valeur: '', libelle: '— choisir —' }, ...JOURS.map((j) => ({ valeur: j, libelle: j }))]}
+                  />
+                </Champ>
+              </div>
+              {structure && (
+                <div className="w-64">
+                  <Champ libelle="Par rapport à la structure chargée">
+                    <Selecteur
+                      valeur={mode}
+                      onChange={(v) => {
+                        setMode(v);
+                        const base = v === 'completer' ? referentiel : null;
+                        setCorrespondances(proposeCorrespondances(base, nomsRencontres(lu)));
+                      }}
+                      options={[
+                        { valeur: 'completer', libelle: 'Compléter (garder le reste)' },
+                        { valeur: 'remplacer', libelle: 'Remplacer entièrement' },
+                      ]}
+                    />
+                  </Champ>
+                </div>
+              )}
+            </div>
+
+            {remplace && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Champ libelle="Auteur">
+                  <input
+                    type="text"
+                    className="w-full rounded-xl border px-3 py-2 text-sm"
+                    style={styleSaisie}
+                    value={metaAuteur}
+                    onChange={(e) => setMetaAuteur(e.target.value)}
+                  />
+                </Champ>
+                <Champ libelle="Établissement">
+                  <input
+                    type="text"
+                    className="w-full rounded-xl border px-3 py-2 text-sm"
+                    style={styleSaisie}
+                    value={metaEtablissement}
+                    onChange={(e) => setMetaEtablissement(e.target.value)}
+                  />
+                </Champ>
+              </div>
+            )}
+
+            {correspondances.length > 0 && (
+              <div>
+                <Etiquette>Correspondance des noms ({correspondances.length})</Etiquette>
+                <p className="mb-2 mt-1 text-xs" style={{ color: 'var(--ink-soft)' }}>
+                  Un fichier de tableur ne dit pas d’identifiant, seulement un nom : c’est cette liste qui décide qui
+                  est qui, avant que quoi que ce soit ne soit chargé.
+                </p>
+                <div className="space-y-1.5">
+                  {correspondances.map((c, i) => (
+                    <LigneCorrespondance key={c.nom} correspondance={c} onChange={(v) => majCorrespondance(i, v)} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <Bouton variante="primaire" onClick={assembler} disabled={!pretAAssembler}>
+              Assembler
+            </Bouton>
+          </>
+        )}
+
+        {resultatAssemblage && (
+          <div className="space-y-3 rounded-xl border p-3" style={{ borderColor: 'var(--border)' }}>
+            <Etiquette>Résultat de l’assemblage</Etiquette>
+            {resultatAssemblage.problemes.length > 0 && <ListeProblemes problemes={resultatAssemblage.problemes} />}
+            {!resultatAssemblage.controle.valide ? (
+              <Bandeau ton="alerte" icone={AlertTriangle} titre="La structure assemblée n’est pas valide">
+                <ListeProblemes problemes={resultatAssemblage.controle.problemes} />
+              </Bandeau>
+            ) : (
+              <>
+                {resultatAssemblage.controle.problemes.length > 0 && (
+                  <ListeProblemes problemes={resultatAssemblage.controle.problemes} />
+                )}
+                <Bouton variante="primaire" icone={Upload} onClick={charger}>
+                  Charger ce planning
+                </Bouton>
+              </>
+            )}
+          </div>
+        )}
+
+        {messageFinal && (
+          <Bandeau ton={messageFinal.ton} icone={messageFinal.ton === 'alerte' ? AlertTriangle : Check}>
+            {messageFinal.texte}
+          </Bandeau>
+        )}
+      </div>
+    </Carte>
   );
 }
 
@@ -2101,17 +2366,15 @@ function EcranFichiers({
         </Carte>
       )}
 
-      <Carte titre="Import CSV" sousTitre="Pas encore branché">
+      <ImportTableur referentiel={referentiel} structure={structure} onCharge={chargerStructure} />
+
+      <Carte titre="Ce qu’un tableur ne peut pas porter">
         <p className="text-sm" style={{ color: 'var(--ink)' }}>
-          Un CSV peut porter le planning type (une ligne par créneau), les listes (jeunes, éducateurs, salles,
-          activités) et les présences hebdomadaires. Il ne peut pas porter les règles : <code style={{ fontFamily: F_MONO }}>cibles</code>{' '}
-          et <code style={{ fontFamily: F_MONO }}>params</code> sont des objets imbriqués, un tableau à plat ne les
-          rend pas sans devenir illisible — elles restent saisies ici.
-        </p>
-        <p className="mt-2 text-sm" style={{ color: 'var(--ink-soft)' }}>
-          L’import passera par un écran de correspondance : un CSV dit « Marie Dupont », pas{' '}
-          <code style={{ fontFamily: F_MONO }}>e1</code>. Le lecteur sera écrit sur un fichier réel plutôt que sur
-          une supposition de format.
+          Les règles ne s’importent pas : <code style={{ fontFamily: F_MONO }}>cibles</code> et{' '}
+          <code style={{ fontFamily: F_MONO }}>params</code> sont des objets imbriqués, un tableau à plat ne les
+          rend pas sans devenir illisible. Elles se saisissent dans l’écran Règles. Les salles ne sont pas non plus
+          détectées : un planning manuscrit ne les nomme généralement pas — elles se complètent à la main dans
+          l’écran Structure si besoin.
         </p>
       </Carte>
     </div>

@@ -115,3 +115,30 @@ export {
 } from './affectations.ts';
 export { estDetacheSur, groupesDeReference } from './detachement.ts';
 export { educateursLibres, jeunesSansAffectation, sallesLibres } from './vues.ts';
+
+export {
+  analyseCellule,
+  decoupeTableau,
+  devineSeparateur,
+  litPlanning,
+  nomsRencontres,
+  normaliseHeure,
+  pasDesBornes,
+  trouveColonneHeures,
+  type BinomeLu,
+  type CelluleLue,
+  type CreneauLu,
+  type PlanningLu,
+} from './import/tableur.ts';
+export { idUnique, normaliseNom, slugifie } from './import/identifiants.ts';
+export {
+  proposeCorrespondances,
+  type CibleCorrespondance,
+  type Correspondance,
+} from './import/correspondance.ts';
+export {
+  assemble,
+  type MetaDepart,
+  type OptionsAssemblage,
+  type ResultatAssemblage,
+} from './import/assemblage.ts';
