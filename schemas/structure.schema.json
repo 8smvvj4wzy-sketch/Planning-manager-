@@ -272,9 +272,10 @@
           "$ref": "#/$defs/identifiant"
         },
         "initiales": {
+          "description": "Malgre son nom (herite du principe d'anonymisation d'origine, initiales seules), ce champ porte en pratique le prenom complet du jeune dans cette application : c'est ainsi que les etablissements le saisissent reellement. maxLength couvre les prenoms composes.",
           "type": "string",
           "minLength": 1,
-          "maxLength": 8
+          "maxLength": 40
         },
         "groupeId": {
           "$ref": "#/$defs/identifiant"

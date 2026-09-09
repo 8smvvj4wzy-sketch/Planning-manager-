@@ -118,16 +118,20 @@ export { educateursLibres, jeunesSansAffectation, sallesLibres } from './vues.ts
 
 export {
   analyseCellule,
+  decodeOctets,
   decoupeTableau,
   devineSeparateur,
+  groupePourColonne,
   litPlanning,
   nomsRencontres,
   normaliseHeure,
   pasDesBornes,
   trouveColonneHeures,
+  trouveGroupesJours,
   type BinomeLu,
   type CelluleLue,
   type CreneauLu,
+  type GroupeJour,
   type PlanningLu,
 } from './import/tableur.ts';
 export { idUnique, normaliseNom, slugifie } from './import/identifiants.ts';

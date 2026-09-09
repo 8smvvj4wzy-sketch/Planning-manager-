@@ -2,17 +2,22 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   analyseCellule,
+  decodeOctets,
   decoupeTableau,
   devineSeparateur,
+  groupePourColonne,
   litPlanning,
   nomsRencontres,
   normaliseHeure,
   pasDesBornes,
   trouveColonneHeures,
+  trouveGroupesJours,
 } from '../src/import/tableur.ts';
 
 /* Les prénoms de ces fixtures sont INVENTÉS. Le dépôt est public : aucun
-   prénom réel de jeune ou d'éducateur ne doit y figurer. Voir CLAUDE.md. */
+   prénom réel de jeune ou d'éducateur ne doit y figurer. Voir CLAUDE.md.
+   Leur forme (groupes de colonnes inégaux, cellules « + » des deux côtés,
+   lignes parasites) reproduit un export réel — sans son contenu. */
 
 describe('découpage CSV', () => {
   it('devine le séparateur sur l ensemble du texte, pas sur la première ligne', () => {
@@ -54,6 +59,21 @@ describe('découpage CSV', () => {
   });
 });
 
+describe('décodage des octets', () => {
+  it('rend un texte UTF-8 valide tel quel', () => {
+    const octets = new TextEncoder().encode('Héléna, Détaché : été');
+    assert.equal(decodeOctets(octets), 'Héléna, Détaché : été');
+  });
+
+  it('bascule sur windows-1252 quand ce n est pas de l UTF-8 valide', () => {
+    // « é » en windows-1252 est l'octet 0xE9 seul — une continuation UTF-8
+    // invalide (un octet de tête UTF-8 valide ne peut pas être seul comme ça
+    // dans ce contexte), ce qui fait échouer le décodage strict.
+    const octets = new Uint8Array([...new TextEncoder().encode('Hel'), 0xe9, ...new TextEncoder().encode('na')]);
+    assert.equal(decodeOctets(octets), 'Heléna');
+  });
+});
+
 describe('heures', () => {
   it('normalise les écritures d un tableur français', () => {
     assert.equal(normaliseHeure('9h30'), '09:30');
@@ -90,13 +110,74 @@ describe('heures', () => {
   });
 });
 
+describe('groupes de jours en tête de colonnes', () => {
+  it('reconnaît plusieurs jours côte à côte, de largeurs inégales', () => {
+    const table = [
+      ['', 'Lundi', '', 'Mardi', '', '', 'Vendredi'],
+      ['9h30', 'a', 'b', 'c', 'd', 'e', 'f'],
+      ['10h', '', '', '', '', '', ''],
+    ];
+    const groupes = trouveGroupesJours(table, 0);
+    assert.deepEqual(groupes, [
+      { brut: 'Lundi', jour: 'lundi', colonneDebut: 1 },
+      { brut: 'Mardi', jour: 'mardi', colonneDebut: 3 },
+      { brut: 'Vendredi', jour: 'vendredi', colonneDebut: 6 },
+    ]);
+  });
+
+  it('ignore les accents et la casse', () => {
+    const table = [
+      ['', 'MERCREDI', '', 'jeûdi'],
+      ['9h30', 'a', 'b', 'c'],
+      ['10h', '', '', ''],
+    ];
+    assert.deepEqual(
+      trouveGroupesJours(table, 0).map((g) => g.jour),
+      ['mercredi', 'jeudi'],
+    );
+  });
+
+  it('rend un jour null pour un en-tête qui ne correspond à aucun jour connu', () => {
+    const table = [
+      ['', 'Lundi', '', 'Vendredi (bis)'],
+      ['9h30', 'a', 'b', 'c'],
+      ['10h', '', '', ''],
+    ];
+    const groupes = trouveGroupesJours(table, 0);
+    assert.equal(groupes[0]!.jour, 'lundi');
+    assert.equal(groupes[1]!.jour, null);
+    assert.equal(groupes[1]!.brut, 'Vendredi (bis)');
+  });
+
+  it('ne trouve rien quand aucune ligne ne nomme un jour avant les heures', () => {
+    const table = [
+      ['', 'Un commentaire quelconque'],
+      ['9h30', 'a'],
+      ['10h', ''],
+    ];
+    assert.deepEqual(trouveGroupesJours(table, 0), []);
+  });
+
+  it('groupePourColonne rend le dernier groupe dont la colonne de départ précède', () => {
+    const groupes = [
+      { brut: 'Lundi', jour: 'lundi' as const, colonneDebut: 1 },
+      { brut: 'Mardi', jour: 'mardi' as const, colonneDebut: 3 },
+    ];
+    assert.equal(groupePourColonne(groupes, 0), null); // colonne des heures
+    assert.equal(groupePourColonne(groupes, 1)?.jour, 'lundi');
+    assert.equal(groupePourColonne(groupes, 2)?.jour, 'lundi');
+    assert.equal(groupePourColonne(groupes, 3)?.jour, 'mardi');
+    assert.equal(groupePourColonne(groupes, 99)?.jour, 'mardi');
+  });
+});
+
 describe('contenu d une cellule', () => {
   it('sépare l activité de ses binômes', () => {
     const lu = analyseCellule('Mand :\nOnyx / Wren\nSable / Pike')!;
     assert.equal(lu.activite, 'Mand');
     assert.deepEqual(lu.binomes, [
-      { jeune: 'Onyx', educateurs: ['Wren'] },
-      { jeune: 'Sable', educateurs: ['Pike'] },
+      { jeunes: ['Onyx'], educateurs: ['Wren'] },
+      { jeunes: ['Sable'], educateurs: ['Pike'] },
     ]);
     assert.deepEqual(lu.restes, []);
   });
@@ -104,12 +185,25 @@ describe('contenu d une cellule', () => {
   it('lit un binôme posé sur la même ligne que l activité', () => {
     const lu = analyseCellule('Protocole : Onyx / Wren')!;
     assert.equal(lu.activite, 'Protocole');
-    assert.deepEqual(lu.binomes, [{ jeune: 'Onyx', educateurs: ['Wren'] }]);
+    assert.deepEqual(lu.binomes, [{ jeunes: ['Onyx'], educateurs: ['Wren'] }]);
   });
 
   it('lit plusieurs accompagnants pour un jeune', () => {
     const lu = analyseCellule('Balade :\nOnyx / Wren + Pike')!;
-    assert.deepEqual(lu.binomes, [{ jeune: 'Onyx', educateurs: ['Wren', 'Pike'] }]);
+    assert.deepEqual(lu.binomes, [{ jeunes: ['Onyx'], educateurs: ['Wren', 'Pike'] }]);
+  });
+
+  it('lit plusieurs jeunes pour un même groupe d accompagnants — le bug du fichier réel', () => {
+    // « Héléna + Valentin + Ilian / Camille+Callista » dans un vrai export :
+    // avant le correctif, tout le côté gauche devenait UN SEUL « jeune » de
+    // 26 caractères.
+    const lu = analyseCellule('Petit groupe :\nOnyx + Sable + Pike / Wren+Lumen')!;
+    assert.deepEqual(lu.binomes, [{ jeunes: ['Onyx', 'Sable', 'Pike'], educateurs: ['Wren', 'Lumen'] }]);
+  });
+
+  it('lit plusieurs jeunes même sans espace autour du +', () => {
+    const lu = analyseCellule('Scolaire :\nOnyx+Sable / Wren')!;
+    assert.deepEqual(lu.binomes, [{ jeunes: ['Onyx', 'Sable'], educateurs: ['Wren'] }]);
   });
 
   it('accepte une activité collective sans binôme', () => {
@@ -130,7 +224,7 @@ describe('contenu d une cellule', () => {
   });
 });
 
-/** Un vendredi de la même forme que le planning réel, prénoms inventés. */
+/** Un vendredi seul, sans autre jour à côté — le cas d'origine, toujours supporté. */
 const VENDREDI = [
   ['', 'Vendredi', '', ''],
   ['9h30', 'Accueil :\nOnyx / Wren\nSable / Pike', 'Protocole :\nLumen / Brise', ''],
@@ -143,7 +237,7 @@ const VENDREDI = [
   ['15h30', '', '', ''],
 ].map((l) => [...l]);
 
-describe('lecture d un planning entier', () => {
+describe('lecture d un planning à un seul jour', () => {
   const lu = litPlanning(VENDREDI);
 
   it('relève les bornes et en déduit le pas', () => {
@@ -153,8 +247,9 @@ describe('lecture d un planning entier', () => {
     assert.equal(lu.fin, '15:30');
   });
 
-  it('retient le titre de la première ligne', () => {
-    assert.equal(lu.titre, 'Vendredi');
+  it('résout le seul groupe détecté sur le jour attendu', () => {
+    assert.deepEqual(lu.jours, [{ brut: 'Vendredi', jour: 'vendredi', colonneDebut: 1 }]);
+    assert.ok(lu.creneaux.every((c) => c.jour === 'vendredi'));
   });
 
   it('prolonge un créneau sur les cellules fusionnées, qui sortent vides', () => {
@@ -179,8 +274,8 @@ describe('lecture d un planning entier', () => {
   it('lit les binômes, y compris à plusieurs accompagnants', () => {
     const balade = lu.creneaux.find((c) => c.activite === 'Balade')!;
     assert.deepEqual(balade.binomes, [
-      { jeune: 'Onyx', educateurs: ['Wren', 'Pike'] },
-      { jeune: 'Sable', educateurs: ['Brise'] },
+      { jeunes: ['Onyx'], educateurs: ['Wren', 'Pike'] },
+      { jeunes: ['Sable'], educateurs: ['Brise'] },
     ]);
   });
 
@@ -210,9 +305,88 @@ describe('lecture d un planning entier', () => {
     // Une seule heure ne suffit pas à repérer la colonne des heures elle-même
     // (`trouveColonneHeures` en exige au moins deux) : c'est ce message qui
     // sort en premier, avant même celui sur le nombre de bornes.
-    assert.throws(
-      () => litPlanning([['9h30', 'Accueil']]),
-      /colonne d'heures/,
-    );
+    assert.throws(() => litPlanning([['9h30', 'Accueil']]), /colonne d'heures/);
+  });
+});
+
+/**
+ * Plusieurs jours côte à côte, groupes de largeurs INÉGALES (2, 3, 1), une
+ * ligne de titre parasite avant l'en-tête des jours, un jour qui ne
+ * correspond à rien de connu, et une ligne de commentaire parasite après la
+ * grille — exactement la forme d'un export réel, noms inventés.
+ */
+const MULTI_JOURS = [
+  ['PLANNING TEST', '', '', '', '', '', ''],
+  ['', 'Lundi', '', 'Mardi', '', '', 'Vendredi (bis)'],
+  ['9h30', 'Accueil :\nOnyx / Wren', '', 'Sport :\nSable + Pike / Lumen', '', 'Mand :\nBrise / Wren', 'Repas'],
+  ['10h', '', '', '', '', '', ''],
+  ['10h30', '', '', '', '', '', ''],
+  ['', 'Voir avec la direction pour le ratio', '', '', '', '', ''],
+].map((l) => [...l]);
+
+describe('lecture d un planning à plusieurs jours', () => {
+  const lu = litPlanning(MULTI_JOURS);
+
+  it('détecte les trois groupes, largeurs inégales comprises', () => {
+    assert.deepEqual(lu.jours, [
+      { brut: 'Lundi', jour: 'lundi', colonneDebut: 1 },
+      { brut: 'Mardi', jour: 'mardi', colonneDebut: 3 },
+      { brut: 'Vendredi (bis)', jour: null, colonneDebut: 6 },
+    ]);
+  });
+
+  it('ignore la ligne de titre parasite avant l en-tête des jours', () => {
+    // « PLANNING TEST » ne doit pas être pris pour un jour, ni empêcher la
+    // détection de la vraie ligne d'en-tête juste après.
+    assert.ok(!lu.jours.some((g) => g.brut.includes('PLANNING')));
+  });
+
+  it('assigne chaque créneau au jour de son groupe de colonnes', () => {
+    const accueil = lu.creneaux.find((c) => c.activite === 'Accueil')!;
+    const sport = lu.creneaux.find((c) => c.activite === 'Sport')!;
+    const mand = lu.creneaux.find((c) => c.activite === 'Mand')!;
+    const repas = lu.creneaux.find((c) => c.activite === 'Repas')!;
+    assert.equal(accueil.jour, 'lundi');
+    assert.equal(sport.jour, 'mardi');
+    assert.equal(mand.jour, 'mardi');
+    assert.equal(repas.jour, null, 'groupe non résolu : jamais deviné');
+  });
+
+  it('lit un binôme à plusieurs jeunes dans un groupe multi-jours', () => {
+    const sport = lu.creneaux.find((c) => c.activite === 'Sport')!;
+    assert.deepEqual(sport.binomes, [{ jeunes: ['Sable', 'Pike'], educateurs: ['Lumen'] }]);
+  });
+
+  it('signale l en-tête non reconnu', () => {
+    assert.ok(lu.remarques.some((r) => r.includes('Vendredi (bis)')));
+  });
+
+  it('ignore la ligne de commentaire après la grille, sans erreur ni créneau fantôme', () => {
+    assert.ok(!lu.creneaux.some((c) => c.activite.includes('ratio')));
+    assert.ok(!lu.creneaux.some((c) => c.activite.includes('direction')));
+  });
+
+  it('recense les noms des deux jours résolus, dans l ordre des colonnes', () => {
+    const noms = nomsRencontres(lu);
+    assert.deepEqual(noms.jeunes, ['Onyx', 'Sable', 'Pike', 'Brise']);
+    assert.deepEqual(noms.educateurs, ['Wren', 'Lumen']);
+  });
+});
+
+describe('lecture sans aucune ligne de jours', () => {
+  const table = [
+    ['9h30', 'Accueil :\nOnyx / Wren'],
+    ['10h', ''],
+    ['10h30', ''],
+  ];
+  const lu = litPlanning(table);
+
+  it('forme un seul groupe implicite, non résolu — jamais deviné', () => {
+    assert.deepEqual(lu.jours, [{ brut: '', jour: null, colonneDebut: 0 }]);
+    assert.ok(lu.creneaux.every((c) => c.jour === null));
+  });
+
+  it('le signale', () => {
+    assert.ok(lu.remarques.some((r) => r.includes('Aucune ligne de jours')));
   });
 });
