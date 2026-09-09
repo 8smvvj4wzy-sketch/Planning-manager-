@@ -3,14 +3,21 @@
  * validees en une `Structure` exploitable.
  *
  * Un seul chemin sert les deux usages demandes :
- *   - COMPLETER la semaine : `base` est la structure chargee, le jour importe
- *     vient s'y ajouter (ou remplacer ses propres creneaux, s'il y en avait
- *     deja pour ce jour) ;
- *   - REMPLACER le fichier : `base` est absent, tout repart de zero avec ce
- *     seul jour.
+ *   - COMPLETER la semaine : `base` est la structure chargee, chaque jour
+ *     importe vient s'y ajouter (ou remplacer ses propres creneaux, s'il y en
+ *     avait deja pour ce jour) ;
+ *   - REMPLACER le fichier : `base` est absent, tout repart de zero avec les
+ *     jours que le fichier contient.
+ *
+ * Les jours ne sont plus imposes par l'appelant : ils viennent du fichier lui
+ * meme (`planningLu.creneaux[].jour`, resolu par `litPlanning` a partir des
+ * groupes de colonnes). Un groupe dont l'en-tete ne correspond a aucun jour
+ * connu peut etre corrige via `resolutionsJours` (texte brut -> jour choisi) ;
+ * sans correction, ses creneaux sont ignores et signales — jamais assignes au
+ * hasard.
  *
  * Ce module ne decide de rien tout seul : il applique les correspondances que
- * l'ecran a fait confirmer, et it signale largement (`problemes`) tout ce
+ * l'ecran a fait confirmer, et il signale largement (`problemes`) tout ce
  * qu'il a du deduire ou n'a pas su lire, plutot que de l'inventer en
  * silence. Le resultat passe ensuite par la validation habituelle
  * (`valideStructure`) comme n'importe quel fichier.
@@ -28,7 +35,7 @@ import type {
 } from '../types.ts';
 import type { Correspondance } from './correspondance.ts';
 import { idUnique, normaliseNom } from './identifiants.ts';
-import type { PlanningLu } from './tableur.ts';
+import { groupePourColonne, type CreneauLu, type PlanningLu } from './tableur.ts';
 
 export interface MetaDepart {
   auteur: string;
@@ -37,10 +44,16 @@ export interface MetaDepart {
 }
 
 export interface OptionsAssemblage {
-  /** Structure a completer. Absente = on repart de zero avec ce seul jour. */
+  /** Structure a completer. Absente = on repart de zero avec les jours du fichier. */
   base?: Structure;
-  jour: Jour;
   correspondances: readonly Correspondance[];
+  /**
+   * Corrige un en-tete de groupe non reconnu comme un jour : cle = texte brut
+   * (`GroupeJour.brut`), valeur = jour choisi, ou `null` pour l'ignorer
+   * explicitement. Un en-tete absent de cette table est ignore de la meme
+   * facon (non resolu = non importe), et signale.
+   */
+  resolutionsJours?: Readonly<Record<string, Jour | null>>;
   /** Utilise seulement quand `base` est absent : il faut bien un auteur. */
   metaDepart?: MetaDepart;
 }
@@ -50,7 +63,15 @@ export interface ResultatAssemblage {
   problemes: Probleme[];
 }
 
-function structureVide(meta: MetaDepart): Structure {
+/**
+ * `pasMinutes` vient du fichier importe, jamais d'un defaut fige : sur une
+ * structure vierge, un pas de 30 code en dur desalignait tout createur ne
+ * de 5 minutes des la premiere heure non ronde (11:15, 12:10...) — l'erreur
+ * de validation resultante ("ne tombe pas sur une frontiere de pas") ne
+ * pointait meme pas vers cette cause, elle se contentait de rejeter les
+ * creneaux un par un.
+ */
+function structureVide(meta: MetaDepart, pasMinutes: number): Structure {
   return {
     meta: {
       version: 1,
@@ -59,7 +80,13 @@ function structureVide(meta: MetaDepart): Structure {
       etablissement: meta.etablissement,
       ...(meta.libelle ? { libelle: meta.libelle } : {}),
     },
-    grille: { pasMinutes: 30, jours: [], debut: '09:00', fin: '17:00', pauses: [] },
+    // Bornes placees aux extremes de la journee : le premier passage par
+    // `elargieGrille`, juste apres, les ramene EXACTEMENT aux bornes reelles
+    // du fichier importe (elle ne fait qu'elargir, jamais retrecir). Un
+    // placeholder « raisonnable » comme 09:00 s'y serait substitue en
+    // silence si le fichier commencait plus tard, sans jamais etre corrige —
+    // fragile des que ce placeholder n'est pas un multiple exact du pas.
+    grille: { pasMinutes, jours: [], debut: '23:59', fin: '00:00', pauses: [] },
     salles: [],
     groupes: [],
     jeunes: [],
@@ -75,7 +102,7 @@ function heureEnMinutes(h: string): number {
   return (heures ?? 0) * 60 + (minutes ?? 0);
 }
 
-/** Etend une grille pour couvrir de nouvelles bornes, sans jamais la retrecir. */
+/** Etend une grille pour couvrir un jour et des bornes, sans jamais la retrecir. */
 function elargieGrille(
   grille: Structure['grille'],
   jour: Jour,
@@ -94,12 +121,30 @@ function plageDuJour(debut: string, fin: string): Plage {
   return { debut, fin };
 }
 
+/**
+ * Jour final d'un creneau lu : celui deja resolu par `litPlanning`, sinon celui
+ * choisi pour son groupe via `resolutionsJours`. `brut` est le texte de
+ * l'en-tete du groupe (utile pour signaler), absent si aucune ligne de jours
+ * n'a ete detectee du tout.
+ */
+function resoutJour(
+  planningLu: PlanningLu,
+  creneau: CreneauLu,
+  resolutions: Readonly<Record<string, Jour | null>> | undefined,
+): { jour: Jour | null; brut: string | undefined } {
+  if (creneau.jour !== null) return { jour: creneau.jour, brut: undefined };
+  const groupe = groupePourColonne(planningLu.jours, creneau.couloir);
+  if (!groupe) return { jour: null, brut: undefined };
+  return { jour: resolutions?.[groupe.brut] ?? null, brut: groupe.brut };
+}
+
 export function assemble(planningLu: PlanningLu, options: OptionsAssemblage): ResultatAssemblage {
   const problemes: Probleme[] = [];
-  const { jour, correspondances } = options;
+  const { correspondances, resolutionsJours } = options;
 
   const depart =
-    options.base ?? structureVide(options.metaDepart ?? { auteur: '', etablissement: '' });
+    options.base ??
+    structureVide(options.metaDepart ?? { auteur: '', etablissement: '' }, planningLu.pasMinutes);
   if (!options.base && (!options.metaDepart?.auteur || !options.metaDepart.etablissement)) {
     problemes.push(
       avertissement(
@@ -110,14 +155,43 @@ export function assemble(planningLu: PlanningLu, options: OptionsAssemblage): Re
     );
   }
 
-  // --- 1. la grille couvre-t-elle deja ce jour et ces heures ? -------------
-  const { grille, elargie } = elargieGrille(depart.grille, jour, planningLu.debut, planningLu.fin);
-  if (elargie) {
+  // --- 0. jour final de chaque creneau, une fois pour toutes --------------
+  const creneauxResolus = planningLu.creneaux.map((creneau) => ({
+    creneau,
+    ...resoutJour(planningLu, creneau, resolutionsJours),
+  }));
+
+  const brutsIgnores = new Set(
+    creneauxResolus.filter((c) => c.jour === null).map((c) => c.brut ?? '(aucun jour detecte)'),
+  );
+  for (const brut of brutsIgnores) {
+    problemes.push(
+      avertissement(
+        'import.jour-ignore',
+        '/planningType',
+        `groupe de colonnes "${brut}" : jour non resolu, ses creneaux sont ignores`,
+      ),
+    );
+  }
+
+  const joursPresents = new Set<Jour>(
+    creneauxResolus.filter((c): c is typeof c & { jour: Jour } => c.jour !== null).map((c) => c.jour),
+  );
+
+  // --- 1. la grille couvre-t-elle deja ces jours et ces heures ? ----------
+  let grille = depart.grille;
+  const joursElargis: Jour[] = [];
+  for (const jour of joursPresents) {
+    const r = elargieGrille(grille, jour, planningLu.debut, planningLu.fin);
+    grille = r.grille;
+    if (r.elargie) joursElargis.push(jour);
+  }
+  if (joursElargis.length > 0) {
     problemes.push(
       avertissement(
         'import.grille',
         '/grille',
-        `la grille a ete elargie pour couvrir ${jour} ${planningLu.debut}–${planningLu.fin}`,
+        `la grille a ete elargie pour couvrir ${joursElargis.join(', ')} ${planningLu.debut}–${planningLu.fin}`,
       ),
     );
   }
@@ -133,12 +207,13 @@ export function assemble(planningLu: PlanningLu, options: OptionsAssemblage): Re
   }
 
   // --- 2. jeunes et educateurs : ceux qui existent s'enrichissent, --------
-  //        les autres sont crees avec des defauts prudents.
+  //        les autres sont crees avec des defauts prudents. La presence /
+  //        disponibilite pour un jour donne se pose plus bas, uniquement pour
+  //        les jours ou la personne apparait reellement dans un creneau.
   const jeunes = new Map(depart.jeunes.map((j) => [j.id, { ...j, presence: { ...j.presence } }]));
   const educateurs = new Map(
     depart.educateurs.map((e) => [e.id, { ...e, disponibilites: { ...e.disponibilites } }]),
   );
-  const plage = plageDuJour(planningLu.debut, planningLu.fin);
   const idParNom = new Map<string, { id: string; cible: 'jeune' | 'educateur' }>();
 
   for (const c of correspondances) {
@@ -146,15 +221,12 @@ export function assemble(planningLu: PlanningLu, options: OptionsAssemblage): Re
     idParNom.set(normaliseNom(c.nom), { id: c.id, cible: c.cible });
 
     if (c.cible === 'jeune') {
-      const existant = jeunes.get(c.id);
-      if (existant) {
-        existant.presence[jour] = plage;
-      } else {
+      if (!jeunes.has(c.id)) {
         const nouveau: Jeune = {
           id: c.id,
           initiales: c.nom,
           encadrement: 1,
-          presence: { [jour]: plage },
+          presence: {},
           actif: true,
         };
         jeunes.set(c.id, nouveau);
@@ -163,15 +235,12 @@ export function assemble(planningLu: PlanningLu, options: OptionsAssemblage): Re
         );
       }
     } else {
-      const existant = educateurs.get(c.id);
-      if (existant) {
-        existant.disponibilites[jour] = plage;
-      } else {
+      if (!educateurs.has(c.id)) {
         const nouveau: Educateur = {
           id: c.id,
           nom: c.nom,
           statut: 'titulaire',
-          disponibilites: { [jour]: plage },
+          disponibilites: {},
           detachable: true,
           actif: true,
         };
@@ -186,6 +255,8 @@ export function assemble(planningLu: PlanningLu, options: OptionsAssemblage): Re
       }
     }
   }
+
+  const plage = plageDuJour(planningLu.debut, planningLu.fin);
 
   // --- 3. activites : matchees par nom, sinon creees. -----------------------
   const activites = new Map(depart.activites.map((a) => [a.id, { ...a }]));
@@ -226,13 +297,16 @@ export function assemble(planningLu: PlanningLu, options: OptionsAssemblage): Re
     return id;
   }
 
-  // --- 4. creneaux du jour : ceux qui existaient deja pour ce jour ---------
-  //        sont remplaces, jamais fusionnes en douce.
-  const creneauxAutresJours = depart.planningType.filter((c) => c.jour !== jour);
+  // --- 4. creneaux : ceux des jours importes remplacent les creneaux -------
+  //        existants de CES jours-la, jamais fusionnes en douce ; les autres
+  //        jours de la structure de depart ne bougent pas.
+  const creneauxAutresJours = depart.planningType.filter((c) => !joursPresents.has(c.jour));
   const idsCreneauxConnus = new Set(depart.planningType.map((c) => c.id));
   const nouveauxCreneaux: CreneauType[] = [];
 
-  for (const creneau of planningLu.creneaux) {
+  for (const { creneau, jour } of creneauxResolus) {
+    if (jour === null) continue; // groupe non resolu : deja signale plus haut
+
     const pas = Math.max(
       1,
       Math.round((heureEnMinutes(creneau.fin) - heureEnMinutes(creneau.debut)) / grille.pasMinutes),
@@ -244,14 +318,21 @@ export function assemble(planningLu: PlanningLu, options: OptionsAssemblage): Re
     const affectations: Affectation[] = [];
 
     for (const binome of creneau.binomes) {
-      const jeuneRef = idParNom.get(normaliseNom(binome.jeune));
-      if (!jeuneRef || jeuneRef.cible !== 'jeune') continue; // ignore ou mal classe : on ne l'invente pas
-      if (!jeunesIds.includes(jeuneRef.id)) jeunesIds.push(jeuneRef.id);
-      for (const nomEducateur of binome.educateurs) {
-        const educateurRef = idParNom.get(normaliseNom(nomEducateur));
-        if (!educateurRef || educateurRef.cible !== 'educateur') continue;
-        if (!educateursIds.includes(educateurRef.id)) educateursIds.push(educateurRef.id);
-        affectations.push({ jeuneId: jeuneRef.id, educateurId: educateurRef.id });
+      const jeuneRefs = binome.jeunes
+        .map((nom) => idParNom.get(normaliseNom(nom)))
+        .filter((r): r is { id: string; cible: 'jeune' | 'educateur' } => !!r && r.cible === 'jeune');
+      const educateurRefs = binome.educateurs
+        .map((nom) => idParNom.get(normaliseNom(nom)))
+        .filter((r): r is { id: string; cible: 'jeune' | 'educateur' } => !!r && r.cible === 'educateur');
+
+      for (const jeuneRef of jeuneRefs) {
+        if (!jeunesIds.includes(jeuneRef.id)) jeunesIds.push(jeuneRef.id);
+        jeunes.get(jeuneRef.id)!.presence[jour] = plage;
+        for (const educateurRef of educateurRefs) {
+          if (!educateursIds.includes(educateurRef.id)) educateursIds.push(educateurRef.id);
+          educateurs.get(educateurRef.id)!.disponibilites[jour] = plage;
+          affectations.push({ jeuneId: jeuneRef.id, educateurId: educateurRef.id });
+        }
       }
     }
 
@@ -275,6 +356,16 @@ export function assemble(planningLu: PlanningLu, options: OptionsAssemblage): Re
           `/planningType`,
           `"${creneau.activite}" ${creneau.debut}–${creneau.fin} (${jour}) : lignes non comprises — ` +
             creneau.restes.join(' · '),
+        ),
+      );
+    }
+    if (creneau.finDeduite) {
+      problemes.push(
+        avertissement(
+          'import.duree-incertaine',
+          `/planningType`,
+          `"${creneau.activite}" ${creneau.debut}–${creneau.fin} (${jour}) : ce couloir ne comporte plus ` +
+            'rien ensuite, la fin a ete deduite de la fermeture de journee — duree reelle a verifier',
         ),
       );
     }

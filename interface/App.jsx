@@ -49,6 +49,7 @@ import {
   chiffre,
   comparePeriodes,
   dechiffre,
+  decodeOctets,
   decoupeTableau,
   educateursLibres,
   estEnveloppeChiffree,
@@ -1867,15 +1868,26 @@ function telecharger(nom, contenu) {
   URL.revokeObjectURL(url);
 }
 
-function ZoneDepot({ libelle, aide, onFichier, accept = 'application/json,.json' }) {
+function ZoneDepot({ libelle, aide, onFichier, accept = 'application/json,.json', binaire = false }) {
   const [survol, setSurvol] = useState(false);
   const entree = useRef(null);
 
   const lire = (fichier) => {
     if (!fichier) return;
     const lecteur = new FileReader();
-    lecteur.onload = () => onFichier(String(lecteur.result), fichier.name);
-    lecteur.readAsText(fichier);
+    if (binaire) {
+      // Un export de tableur n'est pas forcément en UTF-8 : Numbers/Excel
+      // peuvent sortir en windows-1252 selon la version et le systeme.
+      // `readAsText` decoderait en UTF-8 par defaut et corromprait chaque
+      // caractere accentue en silence. `decodeOctets` (src/import/tableur.ts)
+      // essaie l'UTF-8 strict d'abord, bascule sinon — meme mecanisme que le
+      // « coller », ou le presse-papiers livre deja du texte bien decode.
+      lecteur.onload = () => onFichier(decodeOctets(new Uint8Array(lecteur.result)), fichier.name);
+      lecteur.readAsArrayBuffer(fichier);
+    } else {
+      lecteur.onload = () => onFichier(String(lecteur.result), fichier.name);
+      lecteur.readAsText(fichier);
+    }
   };
 
   return (
@@ -1950,12 +1962,44 @@ function LigneCorrespondance({ correspondance, onChange }) {
     </div>
   );
 }
+function LigneJourDetecte({ groupe, resolution, onChange }) {
+  const resolu = groupe.jour !== null;
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm" style={{ borderColor: resolu ? 'var(--border)' : 'var(--crisis)' }}>
+      <span className="w-40 shrink-0 truncate" style={{ color: 'var(--ink)', fontWeight: 600 }} title={groupe.brut || '(aucun jour détecté)'}>
+        {groupe.brut || '(aucun jour détecté)'}
+      </span>
+      {resolu ? (
+        <Badge couleur={CAT_TEAL}>{groupe.jour}</Badge>
+      ) : (
+        <>
+          <div className="w-44">
+            <Selecteur
+              valeur={resolution === null ? 'ignorer' : (resolution ?? '')}
+              onChange={(v) => onChange(v === 'ignorer' ? null : v === '' ? undefined : v)}
+              options={[
+                { valeur: '', libelle: '— à résoudre —' },
+                ...JOURS.map((j) => ({ valeur: j, libelle: j })),
+                { valeur: 'ignorer', libelle: 'Ignorer ce bloc' },
+              ]}
+            />
+          </div>
+          {resolution === undefined && (
+            <span className="text-xs" style={{ color: 'var(--crisis)' }}>
+              non résolu : ses créneaux seront ignorés
+            </span>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
 
 function ImportTableur({ referentiel, structure, onCharge }) {
   const [texte, setTexte] = useState('');
   const [lu, setLu] = useState(null);
   const [erreurLecture, setErreurLecture] = useState(null);
-  const [jourChoisi, setJourChoisi] = useState('');
+  const [resolutionsJours, setResolutionsJours] = useState({});
   const [mode, setMode] = useState('completer');
   const [correspondances, setCorrespondances] = useState([]);
   const [metaAuteur, setMetaAuteur] = useState('');
@@ -1972,11 +2016,7 @@ function ImportTableur({ referentiel, structure, onCharge }) {
       const planning = litPlanning(table);
       setLu(planning);
       setErreurLecture(null);
-
-      const guess = planning.titre
-        ? JOURS.find((j) => j.toLowerCase() === planning.titre.trim().toLowerCase())
-        : undefined;
-      setJourChoisi(guess ?? '');
+      setResolutionsJours({});
 
       const base = mode === 'completer' && structure ? referentiel : null;
       setCorrespondances(proposeCorrespondances(base, nomsRencontres(planning)));
@@ -1989,12 +2029,17 @@ function ImportTableur({ referentiel, structure, onCharge }) {
   const majCorrespondance = (index, valeur) =>
     setCorrespondances(correspondances.map((c, i) => (i === index ? valeur : c)));
 
+  // Groupes dont l'en-tête ne correspond à aucun jour connu : c'est sur eux
+  // seuls que `resolutionsJours` a un effet — les autres sont déjà résolus.
+  const groupesAResoudre = (lu?.jours ?? []).filter((g) => g.jour === null);
+  const toutResolu = groupesAResoudre.every((g) => resolutionsJours[g.brut] !== undefined);
+
   const assembler = () => {
-    if (!lu || !jourChoisi) return;
+    if (!lu) return;
     try {
       const options = {
-        jour: jourChoisi,
         correspondances,
+        resolutionsJours,
         ...(mode === 'completer' && structure ? { base: structure } : {}),
         ...(mode === 'remplacer' || !structure
           ? { metaDepart: { auteur: metaAuteur, etablissement: metaEtablissement } }
@@ -2020,12 +2065,12 @@ function ImportTableur({ referentiel, structure, onCharge }) {
 
   const remplace = mode === 'remplacer' || !structure;
   const metaIncomplete = remplace && (!metaAuteur.trim() || !metaEtablissement.trim());
-  const pretAAssembler = lu && jourChoisi && !metaIncomplete;
+  const pretAAssembler = lu && !metaIncomplete;
 
   return (
     <Carte
       titre="Importer depuis un tableur"
-      sousTitre="Coller le contenu copié depuis Numbers/Excel, ou déposer un fichier CSV/TSV exporté"
+      sousTitre="Coller le contenu copié depuis Numbers/Excel, ou déposer un fichier CSV/TSV exporté — un ou plusieurs jours à la fois"
     >
       <div className="space-y-4">
         <div>
@@ -2041,8 +2086,9 @@ function ImportTableur({ referentiel, structure, onCharge }) {
           <div className="mt-2">
             <ZoneDepot
               libelle="…ou déposer un fichier CSV/TSV"
-              aide="Exporté depuis le tableur."
+              aide="Exporté depuis le tableur. Les accents sont reconnus même si le fichier n’est pas en UTF-8."
               accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain"
+              binaire
               onFichier={(contenu) => analyseTexte(contenu)}
             />
           </div>
@@ -2060,7 +2106,8 @@ function ImportTableur({ referentiel, structure, onCharge }) {
               <Etiquette>Ce qui a été lu</Etiquette>
               <p className="mt-1" style={{ color: 'var(--ink)' }}>
                 {lu.creneaux.length} créneau(x), de {lu.debut} à {lu.fin}
-                {lu.titre ? ` — titre détecté : « ${lu.titre} »` : ''}
+                {lu.jours.length > 0 &&
+                  ` — ${lu.jours.length} jour(s) détecté(s) : ${lu.jours.map((g) => g.brut || '—').join(', ')}`}
               </p>
               {lu.remarques.length > 0 && (
                 <ul className="mt-2 list-disc space-y-0.5 pl-5" style={{ color: 'var(--ink-soft)' }}>
@@ -2071,35 +2118,44 @@ function ImportTableur({ referentiel, structure, onCharge }) {
               )}
             </div>
 
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="w-44">
-                <Champ libelle="Jour importé">
+            {groupesAResoudre.length > 0 && (
+              <div>
+                <Etiquette>Jour(s) à confirmer</Etiquette>
+                <p className="mb-2 mt-1 text-xs" style={{ color: 'var(--ink-soft)' }}>
+                  Ces en-têtes ne correspondent à aucun jour de la grille — choisissez lequel, ou ignorez le
+                  bloc de colonnes. Sans choix, ses créneaux ne sont pas importés.
+                </p>
+                <div className="space-y-1.5">
+                  {groupesAResoudre.map((g) => (
+                    <LigneJourDetecte
+                      key={g.brut}
+                      groupe={g}
+                      resolution={resolutionsJours[g.brut]}
+                      onChange={(v) => setResolutionsJours({ ...resolutionsJours, [g.brut]: v })}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {structure && (
+              <div className="w-64">
+                <Champ libelle="Par rapport à la structure chargée">
                   <Selecteur
-                    valeur={jourChoisi}
-                    onChange={setJourChoisi}
-                    options={[{ valeur: '', libelle: '— choisir —' }, ...JOURS.map((j) => ({ valeur: j, libelle: j }))]}
+                    valeur={mode}
+                    onChange={(v) => {
+                      setMode(v);
+                      const base = v === 'completer' ? referentiel : null;
+                      setCorrespondances(proposeCorrespondances(base, nomsRencontres(lu)));
+                    }}
+                    options={[
+                      { valeur: 'completer', libelle: 'Compléter (garder le reste)' },
+                      { valeur: 'remplacer', libelle: 'Remplacer entièrement' },
+                    ]}
                   />
                 </Champ>
               </div>
-              {structure && (
-                <div className="w-64">
-                  <Champ libelle="Par rapport à la structure chargée">
-                    <Selecteur
-                      valeur={mode}
-                      onChange={(v) => {
-                        setMode(v);
-                        const base = v === 'completer' ? referentiel : null;
-                        setCorrespondances(proposeCorrespondances(base, nomsRencontres(lu)));
-                      }}
-                      options={[
-                        { valeur: 'completer', libelle: 'Compléter (garder le reste)' },
-                        { valeur: 'remplacer', libelle: 'Remplacer entièrement' },
-                      ]}
-                    />
-                  </Champ>
-                </div>
-              )}
-            </div>
+            )}
 
             {remplace && (
               <div className="grid gap-3 sm:grid-cols-2">
@@ -2137,6 +2193,12 @@ function ImportTableur({ referentiel, structure, onCharge }) {
                   ))}
                 </div>
               </div>
+            )}
+
+            {!toutResolu && groupesAResoudre.length > 0 && (
+              <Bandeau ton="info" icone={Info} titre="Jour(s) non confirmé(s)">
+                Vous pouvez assembler sans les résoudre : leurs créneaux seront simplement ignorés et signalés.
+              </Bandeau>
             )}
 
             <Bouton variante="primaire" onClick={assembler} disabled={!pretAAssembler}>

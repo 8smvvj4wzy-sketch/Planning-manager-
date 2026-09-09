@@ -359,3 +359,56 @@ navigateur — `src/transport/chiffrement.ts` importe ces trois noms en **type s
 depuis `node:crypto` (`import type { webcrypto } from 'node:crypto'`), effacé à la
 compilation comme dans le navigateur. Aucune valeur n'en vient : `crypto.subtle` et
 `crypto.getRandomValues` restent le global standard, identique en Node et en navigateur.
+
+## 11. Ce que le deuxième planning réel a corrigé
+
+Un vrai export CSV a révélé trois bugs dans l'import, plus deux autres découverts en
+vérifiant le correctif sur ce même fichier — les cinq confirmés et corrigés sur les
+données réelles, jamais committées (voir CLAUDE.md).
+
+**A — un seul jour importé, toute la semaine dedans.** Le lecteur prenait la première
+cellule de titre trouvée et traitait toutes les colonnes comme un seul jour. Le fichier
+réel a cinq jours côte à côte, en groupes de colonnes de **largeur inégale** (4 ou 5
+selon le jour). Le lecteur détecte maintenant chaque en-tête de jour en tête de son
+groupe de colonnes ; un seul groupe trouvé reste le cas particulier d'un seul jour
+couvrant toute la ligne — pas un second chemin de code. Un en-tête qui ne correspond à
+aucun jour connu donne `jour: null`, jamais deviné, résolu par l'écran de
+correspondance.
+
+**B — une cellule à plusieurs jeunes devenait un seul « jeune » au nom absurde.** Le
+fichier utilise `+` des deux côtés du `/` (« Héléna + Valentin + Ilian / Camille+Callista »),
+pas seulement côté éducateur. `BinomeLu` porte maintenant des listes des deux côtés, et
+l'assembleur en tire le produit croisé jeunes × éducateurs.
+
+**C — le dépôt de fichier corrompait les accents.** Le fichier réel est encodé en
+windows-1252, pas en UTF-8 (confirmé par l'octet `0xE9` pour « é », qui échoue en UTF-8
+strict). `decodeOctets` essaie l'UTF-8 strict puis bascule sur windows-1252 — la même
+logique que le chiffrement pour les types WebCrypto : un global standard, pas une API
+DOM, testable sans navigateur.
+
+**Le `maxLength` de `initiales` (8) était hérité du principe d'initiales de la
+spécification**, jamais révisé quand l'usage réel est devenu le prénom complet —
+« Dianguina » (9) le dépassait même une fois B corrigé. Relâché à 40.
+
+**D — trouvé en vérifiant sur le vrai fichier, pas dans le rapport initial : le pas de
+grille restait à 30 minutes sur une structure construite depuis zéro**, même quand le
+fichier importé avait un pas de 5. `structureVide()` figeait `pasMinutes: 30` en dur ;
+`assemble()` ne le corrigeait jamais. Conséquence : chaque heure non ronde (11h15,
+12h10…) échouait la validation d'alignement sur la grille — une erreur qui ne pointait
+vers rien d'utile. Les bornes de grille par défaut (09:00–17:00) souffraient du même
+problème par coïncidence heureuse plutôt que par construction : elles ne sont désormais
+plus des placeholders « raisonnables » mais des extrêmes (23:59–00:00) que le premier
+élargissement réel ramène exactement aux bornes du fichier — robuste même si un futur
+fichier ne tombe pas par chance sur un multiple du pas.
+
+**Une ambiguïté restante, assumée et signalée plutôt que résolue.** Un CSV ne peut pas
+distinguer « cette cellule fusionnée s'arrête ici, suivie de cellules vides » de
+« fusionnée jusqu'à la fin de la feuille » — les deux ressortent identiques à l'export.
+Quand un couloir ne comporte plus rien après une cellule, sa durée est déduite de la
+fermeture de journée (`CreneauLu.finDeduite: true`) et signalée précisément
+(`import.duree-incertaine`), créneau par créneau — plutôt qu'une remarque générique qui
+ne visait que la toute dernière ligne du tableau, comme avant ce correctif. Sur le
+fichier réel, cette ambiguïté produit ensuite de vrais chevauchements en validation
+(un couloir étiré sur 5 heures percute forcément d'autres créneaux) : c'est la
+validation qui fait son travail, pas un bug à corriger côté import — deviner une durée
+plus courte serait inventer une donnée que le fichier ne contient pas.

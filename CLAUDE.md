@@ -86,6 +86,25 @@ tests et n'est jamais importé depuis `interface/`.
   protègent un fichier en transit, pas son contenu pour qui a la phrase de passe.
   L'export en clair reste toujours disponible à côté : c'est lui le contrat lisible par
   un autre outil.
+- **Un CSV ne dit jamais où une cellule fusionnée s'arrête vraiment.** Un couloir qui ne
+  comporte plus rien après une cellule voit sa durée fermée sur la fin de journée
+  (`CreneauLu.finDeduite`) — ça peut arriver à n'importe quel couloir, pas seulement à
+  la dernière ligne du tableau. Un export réel a produit un créneau de 5 heures pour une
+  activité qui devait durer 30 minutes, qui a ensuite fait exploser la validation en
+  centaines d'erreurs `creneau.chevauchement` sans rapport apparent avec la cause. Le
+  signal `import.duree-incertaine` pointe désormais directement les créneaux concernés.
+- **Un fichier déposé n'est pas forcément en UTF-8.** `decodeOctets`
+  (`src/import/tableur.ts`) essaie l'UTF-8 strict, bascule sur windows-1252 sinon — un
+  export Numbers/Excel réel a été trouvé encodé ainsi (confirmé par l'octet `0xE9` pour
+  « é »). Le collage n'est pas concerné : le presse-papiers livre toujours du texte déjà
+  décodé.
+- **Un placeholder de grille doit être un extrême, pas une valeur "raisonnable".**
+  `structureVide()` (`src/import/assemblage.ts`) posait `09:00`–`17:00` : ça semblait
+  fonctionner tant que le fichier importé commençait après 9h et un pas qui divisait
+  l'écart — un pas de 5 minutes avec un fichier commençant à 9h30 a suffi à faire
+  échouer l'alignement de grille pour toute heure non ronde. Les bornes de départ sont
+  maintenant `23:59`/`00:00` : le premier élargissement réel les remplace forcément par
+  les bornes exactes du fichier, sans compter sur la chance.
 
 ## Avant toute livraison
 

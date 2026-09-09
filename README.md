@@ -165,8 +165,13 @@ jeunesSansAffectation(ref, planning, etat);    // les oubliés du planning
 ## Import depuis un tableur
 
 `src/import/tableur.ts` lit un CSV/TSV collé ou déposé — coller depuis Numbers ou
-Excel, ou un fichier exporté. Il ne fait que découper et lire : il ne fabrique rien,
-il ne décide pas qui est jeune ou éducateur.
+Excel, ou un fichier exporté (accents reconnus même hors UTF-8). Il ne fait que
+découper et lire : il ne fabrique rien, il ne décide pas qui est jeune ou éducateur.
+
+**Un ou plusieurs jours en une seule lecture.** Le fichier peut porter un seul jour, ou
+les cinq côte à côte en groupes de colonnes — chaque en-tête est détecté et résolu
+individuellement ; un en-tête qui ne correspond à aucun jour connu est signalé, jamais
+deviné.
 
 ```ts
 import { decoupeTableau, litPlanning, proposeCorrespondances, assemble } from 'planning-ime';
@@ -174,7 +179,7 @@ import { decoupeTableau, litPlanning, proposeCorrespondances, assemble } from 'p
 const lu = litPlanning(decoupeTableau(texteColle));
 const correspondances = proposeCorrespondances(referentiel, nomsRencontres(lu));
 // ... l'écran de correspondance laisse confirmer/corriger, puis :
-const { structure, problemes } = assemble(lu, { base: structureExistante, jour: 'vendredi', correspondances });
+const { structure, problemes } = assemble(lu, { base: structureExistante, correspondances });
 ```
 
 `assemble()` remplace les créneaux du jour importé sans toucher aux autres — réimporter
