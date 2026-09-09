@@ -1,0 +1,2427 @@
+/* Planning IME — interface.
+
+   Le moteur vit dans src/ (TypeScript, testé à part) : cet écran ne recalcule
+   rien, il appelle `repare`, `evalue`, `valideStructure` et affiche ce qu'ils
+   rendent. Toute règle métier qui apparaîtrait ici serait une seconde source
+   de vérité — c'est exactement ce que la séparation évite.
+
+   Même grammaire visuelle que DatABA Manager : navigation latérale
+   persistante, tokens de surface sur [data-theme], couleur sur [data-accent],
+   palette catégorielle fixe hors thème. DESIGN.md du dépôt DatABA Manager
+   fait foi. */
+
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  AlertTriangle,
+  CalendarDays,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  CircleAlert,
+  Download,
+  FileJson,
+  Grid3x3,
+  Info,
+  Moon,
+  Pin,
+  Printer,
+  RefreshCw,
+  Settings,
+  Sun,
+  Trash2,
+  Upload,
+  Users,
+  Wrench,
+  X,
+} from 'lucide-react';
+
+import {
+  JOURS,
+  Referentiel,
+  auditeJourNominal,
+  catalogue,
+  construitEtatJour,
+  educateursLibres,
+  calculDisponibilite,
+  etatJourNominal,
+  jeunesSansAffectation,
+  jourDeLaDate,
+  optionsAvec,
+  planningTypeDuJour,
+  repare,
+  sallesLibres,
+  valideJour,
+  valideStructure,
+} from '../src/index.ts';
+
+/* L'application est livrée VIERGE : aucune donnee nominative n'entre dans le
+   bundle, pas meme un exemple. `examples/` reste au depot pour la suite de
+   tests, et n'est jamais importe ici — le depot est public. */
+
+/* ==================== Constantes ==================== */
+
+const F_DISPLAY = "'Space Grotesk', system-ui, sans-serif";
+const F_BODY = "'IBM Plex Sans', system-ui, sans-serif";
+const F_MONO = "'IBM Plex Mono', ui-monospace, monospace";
+
+/* Palette catégorielle, reprise de DatABA Manager. Fixe dans tous les thèmes :
+   elle porte du sens (quelle activité, quel groupe), pas de la décoration.
+   Un thème rose ne repeint pas la piscine. */
+const CAT_TEAL = '#00A870';
+const CAT_INDIGO = '#3B5BDB';
+const CAT_AMBER = '#FF8A3D';
+const CAT_CORAL = '#FF4D6D';
+const CAT_VIOLET = '#7C5CFF';
+const CAT_CYAN = '#00B8D9';
+const CAT_LILAS = '#A78BFA';
+const CAT_ARDOISE = '#64748B';
+
+const PALETTE = [CAT_INDIGO, CAT_TEAL, CAT_AMBER, CAT_VIOLET, CAT_CYAN, CAT_CORAL, CAT_LILAS, CAT_ARDOISE];
+
+const PREFIXE = 'planning-ime:';
+const CLE_STRUCTURE = `${PREFIXE}structure`;
+const CLE_JOUR = `${PREFIXE}jour`;
+const CLE_OPTIONS = `${PREFIXE}options`;
+const CLE_THEME = `${PREFIXE}theme`;
+const CLE_ACCENT = `${PREFIXE}accent`;
+
+const ACCENTS = [
+  { id: null, nom: 'Neutre', swatch: 'var(--swatch-neutre)' },
+  { id: 'rose', nom: 'Rose', swatch: 'var(--swatch-rose)' },
+  { id: 'vert', nom: 'Vert', swatch: 'var(--swatch-vert)' },
+  { id: 'jaune', nom: 'Jaune', swatch: 'var(--swatch-jaune)' },
+  { id: 'rouge', nom: 'Rouge', swatch: 'var(--swatch-rouge)' },
+];
+
+/* ==================== Petites fonctions ==================== */
+
+/* Le contraste d'un texte posé sur une couleur de la palette catégorielle
+   n'est pas supposé blanc : un badge ambre ou lilas se lit en encre sombre.
+   Portée de DatABA Manager. */
+function texteLisibleSur(hex) {
+  const n = hex.replace('#', '');
+  const composante = (i) => {
+    const c = parseInt(n.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = 0.2126 * composante(0) + 0.7152 * composante(2) + 0.0722 * composante(4);
+  return luminance > 0.45 ? '#0E1B33' : '#FFFFFF';
+}
+
+/* Couleur stable d'une activité : même activité, même teinte d'une session à
+   l'autre. L'index dans le référentiel plutôt qu'un hachage — l'ordre du
+   fichier est stable et le résultat reste lisible en cas d'ajout. */
+function couleurActivite(ref, activiteId) {
+  const index = ref.structure.activites.findIndex((a) => a.id === activiteId);
+  return PALETTE[(index < 0 ? 0 : index) % PALETTE.length];
+}
+
+function classeDate(date) {
+  try {
+    return new Date(`${date}T12:00:00Z`).toLocaleDateString('fr-FR', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC',
+    });
+  } catch {
+    return date;
+  }
+}
+
+function aujourdhui() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/* ==================== Stockage ====================
+   PRÉFIXE OBLIGATOIRE `planning-ime:`. DatABA, DatABA Manager et cette
+   application partagent la même adresse github.io, donc le même
+   localStorage : un `localStorage.clear()` global ici effacerait les données
+   de production des autres. Aucune suppression ne sort de ce préfixe.
+
+   Pas d'IndexedDB, contrairement à DatABA Manager : ce qu'on stocke est un
+   structure.json (quelques dizaines de Ko même pour un gros établissement),
+   pas un bloc consolidé de séances. Le repli devrait être revu au-delà de
+   ~2 Mo, soit environ 3 000 créneaux — on en est loin.
+
+   La leçon de Manager tient quand même : un `setItem` qui ne lève pas ne
+   prouve rien. Toute écriture est relue avant d'être annoncée réussie, et un
+   échec remonte à l'écran plutôt que d'être avalé. */
+
+function lireStockage(cle) {
+  try {
+    const brut = localStorage.getItem(cle);
+    return brut ? JSON.parse(brut) : null;
+  } catch {
+    return null;
+  }
+}
+
+function ecrireStockage(cle, valeur) {
+  try {
+    const texte = JSON.stringify(valeur);
+    localStorage.setItem(cle, texte);
+    // Relecture : une session éphémère accepte l'écriture puis ne rend rien.
+    return localStorage.getItem(cle) === texte;
+  } catch {
+    return false;
+  }
+}
+
+function effacerStockage(cle) {
+  try {
+    localStorage.removeItem(cle);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/* ==================== Primitives ==================== */
+
+function Carte({ titre, sousTitre, actions, children, className = '', ...reste }) {
+  return (
+    <section
+      className={`rounded-2xl border ${className}`}
+      style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
+      {...reste}
+    >
+      {(titre || actions) && (
+        <header className="flex items-start justify-between gap-4 px-5 pt-4 pb-3">
+          <div>
+            {titre && (
+              <h2 className="text-base" style={{ fontFamily: F_DISPLAY, fontWeight: 600, color: 'var(--ink)' }}>
+                {titre}
+              </h2>
+            )}
+            {sousTitre && (
+              <p className="mt-0.5 text-sm" style={{ color: 'var(--ink-soft)' }}>
+                {sousTitre}
+              </p>
+            )}
+          </div>
+          {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+        </header>
+      )}
+      <div className="px-5 pb-5">{children}</div>
+    </section>
+  );
+}
+
+function Bouton({ variante = 'outline', icone: Icone, enfants, children, ...reste }) {
+  const styles =
+    variante === 'primaire'
+      ? { background: 'var(--accent)', color: 'var(--accent-ink)', borderColor: 'var(--accent)' }
+      : variante === 'danger'
+        ? { background: 'transparent', color: 'var(--crisis)', borderColor: 'var(--crisis)' }
+        : { background: 'transparent', color: 'var(--ink)', borderColor: 'var(--border)' };
+  return (
+    <button
+      type="button"
+      className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm disabled:opacity-40"
+      style={{ fontFamily: F_BODY, ...styles }}
+      {...reste}
+    >
+      {Icone && <Icone size={16} aria-hidden="true" />}
+      {children ?? enfants}
+    </button>
+  );
+}
+
+function Etiquette({ children }) {
+  return (
+    <span
+      className="text-[11px] uppercase tracking-wide"
+      style={{ fontFamily: F_MONO, fontWeight: 500, color: 'var(--ink-soft)' }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function Badge({ couleur, children, titre }) {
+  return (
+    <span
+      className="inline-flex items-center rounded-lg px-2 py-0.5 text-xs"
+      style={{ background: couleur, color: texteLisibleSur(couleur), fontFamily: F_MONO, fontWeight: 500 }}
+      title={titre}
+    >
+      {children}
+    </span>
+  );
+}
+
+function Champ({ libelle, aide, children }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-sm" style={{ color: 'var(--ink)' }}>
+        {libelle}
+      </span>
+      {children}
+      {aide && (
+        <span className="mt-1 block text-xs" style={{ color: 'var(--ink-soft)' }}>
+          {aide}
+        </span>
+      )}
+    </label>
+  );
+}
+
+const styleSaisie = {
+  background: 'var(--card)',
+  color: 'var(--ink)',
+  borderColor: 'var(--border)',
+  fontFamily: F_BODY,
+};
+
+function Selecteur({ valeur, onChange, options, ...reste }) {
+  return (
+    <select
+      className="w-full rounded-xl border px-3 py-2 text-sm"
+      style={styleSaisie}
+      value={valeur}
+      onChange={(e) => onChange(e.target.value)}
+      {...reste}
+    >
+      {options.map((o) => (
+        <option key={String(o.valeur)} value={o.valeur}>
+          {o.libelle}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function Vide({ children }) {
+  return (
+    <p className="py-6 text-center text-sm" style={{ color: 'var(--ink-soft)' }}>
+      {children}
+    </p>
+  );
+}
+
+/* Bandeau d'alerte. `ton` : 'info' | 'alerte' | 'succes'. */
+function Bandeau({ ton = 'info', icone: Icone, titre, children }) {
+  const couleur = ton === 'alerte' ? 'var(--crisis)' : ton === 'succes' ? CAT_TEAL : 'var(--ink-soft)';
+  return (
+    <div
+      className="flex gap-3 rounded-xl border p-3 text-sm"
+      style={{ borderColor: couleur, color: 'var(--ink)', background: 'var(--card)' }}
+    >
+      {Icone && <Icone size={18} style={{ color: couleur }} className="mt-0.5 shrink-0" aria-hidden="true" />}
+      <div className="min-w-0">
+        {titre && <p style={{ fontWeight: 600 }}>{titre}</p>}
+        <div style={{ color: 'var(--ink-soft)' }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/* Liste de problèmes de validation, avec son code et son pointeur JSON : c'est
+   ce qui permet de retrouver le champ fautif dans le fichier sans le relire
+   en entier. */
+function ListeProblemes({ problemes, limite = 50 }) {
+  if (problemes.length === 0) {
+    return (
+      <Bandeau ton="succes" icone={Check} titre="Aucun problème">
+        Le fichier est exploitable tel quel.
+      </Bandeau>
+    );
+  }
+  const affiches = problemes.slice(0, limite);
+  return (
+    <div className="space-y-1.5">
+      {affiches.map((p, i) => (
+        <div
+          key={`${p.chemin}-${p.code}-${i}`}
+          className="flex items-start gap-2 rounded-lg border px-3 py-2 text-sm"
+          style={{
+            borderColor: p.gravite === 'erreur' ? 'var(--crisis)' : 'var(--border)',
+            background: 'var(--card)',
+          }}
+        >
+          <span
+            className="mt-0.5 shrink-0 text-[11px] uppercase"
+            style={{
+              fontFamily: F_MONO,
+              fontWeight: 600,
+              color: p.gravite === 'erreur' ? 'var(--crisis)' : 'var(--ink-soft)',
+            }}
+          >
+            {p.gravite === 'erreur' ? 'erreur' : 'avert.'}
+          </span>
+          <span className="min-w-0">
+            <code className="text-xs" style={{ fontFamily: F_MONO, color: 'var(--ink-soft)' }}>
+              {p.chemin}
+            </code>{' '}
+            <span style={{ color: 'var(--ink)' }}>{p.message}</span>{' '}
+            <span className="text-xs" style={{ fontFamily: F_MONO, color: 'var(--ink-soft)' }}>
+              [{p.code}]
+            </span>
+          </span>
+        </div>
+      ))}
+      {problemes.length > affiches.length && (
+        <p className="pt-1 text-xs" style={{ color: 'var(--ink-soft)' }}>
+          … et {problemes.length - affiches.length} autre(s).
+        </p>
+      )}
+    </div>
+  );
+}
+
+/* ==================== Navigation ==================== */
+
+const DESTINATIONS = [
+  { id: 'planning', nom: 'Planning', icone: Grid3x3 },
+  { id: 'journee', nom: 'Journée', icone: CalendarDays },
+  { id: 'regles', nom: 'Règles', icone: Wrench },
+  { id: 'structure', nom: 'Structure', icone: Users },
+  { id: 'fichiers', nom: 'Fichiers', icone: FileJson },
+  { id: 'reglages', nom: 'Réglages', icone: Settings },
+];
+
+function NavigationLaterale({ destination, setDestination, replie, setReplie, theme, basculerTheme }) {
+  return (
+    <nav
+      className="no-print flex shrink-0 flex-col border-r"
+      style={{ width: replie ? 64 : 232, background: 'var(--nav-bg)', borderColor: 'var(--border)' }}
+      aria-label="Navigation principale"
+    >
+      <div className="flex items-center gap-2 px-4 py-4">
+        {!replie && (
+          <span className="truncate text-sm" style={{ fontFamily: F_DISPLAY, fontWeight: 600, color: 'var(--ink)' }}>
+            Planning IME
+          </span>
+        )}
+      </div>
+
+      <ul className="flex-1 space-y-1 px-2">
+        {DESTINATIONS.map(({ id, nom, icone: Icone }) => {
+          const actif = destination === id;
+          return (
+            <li key={id}>
+              <button
+                type="button"
+                onClick={() => setDestination(id)}
+                title={replie ? nom : undefined}
+                aria-current={actif ? 'page' : undefined}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm"
+                style={{
+                  background: actif ? 'var(--accent)' : 'transparent',
+                  color: actif ? 'var(--accent-ink)' : 'var(--ink)',
+                  fontFamily: F_BODY,
+                  justifyContent: replie ? 'center' : 'flex-start',
+                }}
+              >
+                <Icone size={18} aria-hidden="true" />
+                {!replie && <span>{nom}</span>}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+
+      <div className="flex items-center gap-2 px-2 pb-3" style={{ justifyContent: replie ? 'center' : 'flex-start' }}>
+        <button
+          type="button"
+          onClick={basculerTheme}
+          title={theme === 'dark' ? 'Passer en clair' : 'Passer en sombre'}
+          aria-label={theme === 'dark' ? 'Passer en clair' : 'Passer en sombre'}
+          className="rounded-xl border p-2"
+          style={{ borderColor: 'var(--border)', color: 'var(--ink)' }}
+        >
+          {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+        </button>
+        <button
+          type="button"
+          onClick={() => setReplie(!replie)}
+          title={replie ? 'Déplier' : 'Replier'}
+          aria-label={replie ? 'Déplier la navigation' : 'Replier la navigation'}
+          className="rounded-xl border p-2"
+          style={{ borderColor: 'var(--border)', color: 'var(--ink)' }}
+        >
+          {replie ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+        </button>
+      </div>
+    </nav>
+  );
+}
+
+/* ==================== Grille ====================
+   Lignes = pas de la grille, colonnes = salles, éducateurs ou jeunes selon
+   l'axe choisi. Un créneau occupe `span pas` lignes ; une case vide sur l'axe
+   « salles » est une salle libre — la vue « salles libres » de la
+   spécification ne demande donc aucun écran à part, c'est cette grille lue à
+   l'envers. */
+
+const AXES = [
+  { valeur: 'salle', libelle: 'par salle' },
+  { valeur: 'educateur', libelle: 'par éducateur' },
+  { valeur: 'jeune', libelle: 'par jeune' },
+];
+
+function colonnesDe(ref, axe) {
+  if (axe === 'educateur') {
+    return ref.structure.educateurs
+      .filter((e) => e.actif)
+      .map((e) => ({ id: e.id, nom: ref.libelleEducateur(e.id), sousTitre: e.statut }));
+  }
+  if (axe === 'jeune') {
+    return ref.structure.jeunes
+      .filter((j) => j.actif)
+      .map((j) => ({ id: j.id, nom: j.initiales, sousTitre: ref.groupes.get(j.groupeId)?.nom ?? '—' }));
+  }
+  return ref.structure.salles.map((s) => ({ id: s.id, nom: s.nom, sousTitre: `${s.capacite} places` }));
+}
+
+function colonnesDuCreneau(creneau, axe) {
+  if (axe === 'educateur') return creneau.educateurs;
+  if (axe === 'jeune') return creneau.jeunes;
+  return creneau.salleId ? [creneau.salleId] : [];
+}
+
+const HAUTEUR_PAS = 34;
+
+function Grille({ referentiel, planning, axe, signalements, onCreneau }) {
+  const colonnes = colonnesDe(referentiel, axe);
+  const nbPas = referentiel.grille.nbPas;
+
+  const blocs = [];
+  for (const creneau of planning.creneaux) {
+    const cols = colonnesDuCreneau(creneau, axe);
+    for (const colId of cols) {
+      const index = colonnes.findIndex((c) => c.id === colId);
+      if (index < 0) continue;
+      blocs.push({ creneau, colonne: index });
+    }
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <div
+        className="grid min-w-max"
+        style={{
+          gridTemplateColumns: `64px repeat(${colonnes.length}, minmax(132px, 1fr))`,
+          gridTemplateRows: `auto repeat(${nbPas}, ${HAUTEUR_PAS}px)`,
+        }}
+      >
+        {/* En-tête */}
+        <div
+          className="sticky left-0 z-20 border-b border-r px-2 py-2"
+          style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
+        />
+        {colonnes.map((c) => (
+          <div
+            key={c.id}
+            className="border-b border-r px-2 py-2"
+            style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
+          >
+            <div className="truncate text-sm" style={{ color: 'var(--ink)', fontWeight: 600 }} title={c.nom}>
+              {c.nom}
+            </div>
+            <div className="truncate text-xs" style={{ color: 'var(--ink-soft)' }}>
+              {c.sousTitre}
+            </div>
+          </div>
+        ))}
+
+        {/* Fond : heures et cases */}
+        {Array.from({ length: nbPas }, (_, p) => {
+          const pause = referentiel.grille.estPause(p);
+          return (
+            <React.Fragment key={`ligne-${p}`}>
+              <div
+                className="sticky left-0 z-10 border-b border-r px-2 text-[11px]"
+                style={{
+                  gridColumn: 1,
+                  gridRow: p + 2,
+                  background: 'var(--card)',
+                  borderColor: 'var(--border)',
+                  color: 'var(--ink-soft)',
+                  fontFamily: F_MONO,
+                }}
+              >
+                {referentiel.grille.heureDePas(p)}
+              </div>
+              {colonnes.map((c, i) => (
+                <div
+                  key={`case-${p}-${c.id}`}
+                  className="border-b border-r"
+                  style={{
+                    gridColumn: i + 2,
+                    gridRow: p + 2,
+                    borderColor: 'var(--border)',
+                    background: pause ? 'var(--nav-bg)' : 'transparent',
+                  }}
+                />
+              ))}
+            </React.Fragment>
+          );
+        })}
+
+        {/* Créneaux */}
+        {blocs.map(({ creneau, colonne }) => {
+          const couleur = couleurActivite(referentiel, creneau.activiteId);
+          const signal = signalements?.get(creneau.id);
+          const encre = texteLisibleSur(couleur);
+          return (
+            <button
+              type="button"
+              key={`${creneau.id}-${colonne}`}
+              onClick={() => onCreneau?.(creneau.id)}
+              className="m-[2px] overflow-hidden rounded-lg px-2 py-1 text-left"
+              style={{
+                gridColumn: colonne + 2,
+                gridRow: `${creneau.pasDebut + 2} / span ${creneau.pas}`,
+                background: couleur,
+                color: encre,
+                boxShadow: signal?.conflit
+                  ? '0 0 0 3px var(--crisis)'
+                  : signal?.dur
+                    ? '0 0 0 2px var(--crisis)'
+                    : signal?.souple
+                      ? '0 0 0 2px var(--ink-soft)'
+                      : 'none',
+              }}
+              title={`${referentiel.activite(creneau.activiteId)?.nom ?? creneau.activiteId} — ${referentiel.grille.heureDePas(creneau.pasDebut)}`}
+            >
+              <span className="flex items-center gap-1 truncate text-xs" style={{ fontWeight: 600 }}>
+                {(creneau.verrouille || creneau.epingle) && (
+                  <Pin size={11} className="shrink-0" aria-label="Créneau figé" />
+                )}
+                <span className="truncate">
+                  {referentiel.activite(creneau.activiteId)?.nom ?? creneau.activiteId}
+                </span>
+              </span>
+              <span className="block truncate text-[11px]" style={{ opacity: 0.85, fontFamily: F_MONO }}>
+                {axe === 'jeune'
+                  ? creneau.educateurs.map((e) => referentiel.libelleEducateur(e)).join(', ') || '— sans éducateur'
+                  : creneau.jeunes.map((j) => referentiel.libelleJeune(j)).join(', ') || '— sans jeune'}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ==================== Détail d'un créneau ====================
+   La modale ne retient que l'identifiant du créneau, jamais l'objet : sinon
+   elle afficherait un état figé au moment du clic pendant que le planning
+   change derrière elle (leçon de DatABA Manager). */
+
+function DetailCreneau({ referentiel, planning, creneauId, violations, conflit, onFermer }) {
+  const creneau = planning.creneau(creneauId);
+  if (!creneau) return null;
+  const activite = referentiel.activite(creneau.activiteId);
+  const fin = referentiel.grille.heureDePas(creneau.pasDebut + creneau.pas);
+
+  return (
+    <div
+      className="no-print fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'var(--overlay-backdrop)' }}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Détail du créneau"
+      onClick={onFermer}
+    >
+      <div
+        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-2xl border p-5"
+        style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-lg" style={{ fontFamily: F_DISPLAY, fontWeight: 600, color: 'var(--ink)' }}>
+              {activite?.nom ?? creneau.activiteId}
+            </h3>
+            <p className="text-sm" style={{ color: 'var(--ink-soft)', fontFamily: F_MONO }}>
+              {referentiel.grille.heureDePas(creneau.pasDebut)} – {fin} · {creneau.id}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onFermer}
+            aria-label="Fermer"
+            className="rounded-xl border p-1.5"
+            style={{ borderColor: 'var(--border)', color: 'var(--ink)' }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <dl className="mt-4 space-y-3 text-sm">
+          <div>
+            <dt><Etiquette>Salle</Etiquette></dt>
+            <dd style={{ color: 'var(--ink)' }}>
+              {creneau.salleId ? (referentiel.salle(creneau.salleId)?.nom ?? creneau.salleId) : 'aucune'}
+            </dd>
+          </div>
+          <div>
+            <dt><Etiquette>Jeunes ({creneau.jeunes.length})</Etiquette></dt>
+            <dd className="flex flex-wrap gap-1.5 pt-1">
+              {creneau.jeunes.length === 0 ? (
+                <span style={{ color: 'var(--ink-soft)' }}>aucun jeune présent</span>
+              ) : (
+                creneau.jeunes.map((id) => (
+                  <Badge key={id} couleur={CAT_INDIGO} titre={`encadrement ${referentiel.jeune(id)?.encadrement ?? '?'}`}>
+                    {referentiel.libelleJeune(id)}
+                  </Badge>
+                ))
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt><Etiquette>Éducateurs ({creneau.educateurs.length})</Etiquette></dt>
+            <dd className="flex flex-wrap gap-1.5 pt-1">
+              {creneau.educateurs.length === 0 ? (
+                <span style={{ color: 'var(--crisis)' }}>aucun éducateur</span>
+              ) : (
+                creneau.educateurs.map((id) => (
+                  <Badge key={id} couleur={CAT_TEAL} titre={referentiel.educateur(id)?.statut}>
+                    {referentiel.libelleEducateur(id)}
+                  </Badge>
+                ))
+              )}
+            </dd>
+          </div>
+          {(creneau.verrouille || creneau.epingle) && (
+            <div>
+              <dt><Etiquette>Statut</Etiquette></dt>
+              <dd style={{ color: 'var(--ink)' }}>
+                {creneau.verrouille && 'Verrouillé dans la structure — le moteur contourne au lieu de le déplacer. '}
+                {creneau.epingle && 'Épinglé pour aujourd’hui.'}
+              </dd>
+            </div>
+          )}
+        </dl>
+
+        {conflit && (
+          <div className="mt-4">
+            <Bandeau ton="alerte" icone={CircleAlert} titre="Conflit non résolu">
+              {conflit.message}
+            </Bandeau>
+          </div>
+        )}
+
+        {violations.length > 0 && (
+          <div className="mt-4 space-y-1.5">
+            <Etiquette>Règles concernées</Etiquette>
+            {violations.map((v, i) => (
+              <p
+                key={`${v.regleId}-${i}`}
+                className="rounded-lg border px-3 py-2 text-sm"
+                style={{ borderColor: v.dure ? 'var(--crisis)' : 'var(--border)', color: 'var(--ink)' }}
+              >
+                <span style={{ fontFamily: F_MONO, color: 'var(--ink-soft)' }}>
+                  {v.regleId} · {v.dure ? 'dure' : 'souple'}
+                </span>
+                <br />
+                {v.message}
+              </p>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ==================== Écran Planning ==================== */
+
+function EcranPlanning({ referentiel, jourAffiche, setJourAffiche, axe, setAxe, source, setSource, reparation, options }) {
+  const [creneauOuvert, setCreneauOuvert] = useState(null);
+
+  /* Deux plannings possibles : le planning type du jour (la référence, ce qui
+     tourne quand tout le monde est là) et la journée réparée. Le second
+     n'existe que si une réparation a été lancée pour ce jour-là. */
+  const reparationDuJour = reparation && reparation.planning.jour === jourAffiche ? reparation : null;
+  const montreReparation = source === 'reparation' && reparationDuJour;
+
+  const planning = useMemo(
+    () => (montreReparation ? reparationDuJour.planning : planningTypeDuJour(referentiel, jourAffiche)),
+    [montreReparation, reparationDuJour, referentiel, jourAffiche],
+  );
+
+  const etat = useMemo(() => etatJourNominal(jourAffiche), [jourAffiche]);
+
+  /* Audit du planning type : sans réparation affichée, on montre quand même
+     ce que le jour de référence viole déjà. */
+  const audit = useMemo(
+    () => (montreReparation ? null : auditeJourNominal(referentiel, jourAffiche, options)),
+    [montreReparation, referentiel, jourAffiche, options],
+  );
+
+  const violations = montreReparation ? reparationDuJour.violations : (audit?.violations ?? []);
+  const conflits = montreReparation ? reparationDuJour.conflits : (audit?.conflits ?? []);
+
+  const signalements = useMemo(() => {
+    const m = new Map();
+    for (const v of violations) {
+      for (const id of v.creneaux) {
+        const e = m.get(id) ?? {};
+        if (v.dure) e.dur = true;
+        else e.souple = true;
+        m.set(id, e);
+      }
+    }
+    for (const c of conflits) m.set(c.creneauId, { ...(m.get(c.creneauId) ?? {}), conflit: true });
+    return m;
+  }, [violations, conflits]);
+
+  const libres = useMemo(() => sallesLibres(referentiel, planning), [referentiel, planning]);
+  const oublies = useMemo(() => jeunesSansAffectation(referentiel, planning, etat), [referentiel, planning, etat]);
+
+  const imprimer = useCallback(() => {
+    document.body.classList.add('impression-ciblee');
+    const nettoyer = () => {
+      document.body.classList.remove('impression-ciblee');
+      window.removeEventListener('afterprint', nettoyer);
+    };
+    window.addEventListener('afterprint', nettoyer);
+    window.print();
+  }, []);
+
+  const joursDeLaGrille = referentiel.structure.grille.jours;
+
+  return (
+    <div className="space-y-4">
+      <div className="no-print flex flex-wrap items-end gap-3">
+        <div className="w-40">
+          <Champ libelle="Jour">
+            <Selecteur
+              valeur={jourAffiche}
+              onChange={setJourAffiche}
+              options={joursDeLaGrille.map((j) => ({ valeur: j, libelle: j }))}
+            />
+          </Champ>
+        </div>
+        <div className="w-44">
+          <Champ libelle="Axe">
+            <Selecteur valeur={axe} onChange={setAxe} options={AXES} />
+          </Champ>
+        </div>
+        <div className="w-56">
+          <Champ libelle="Affichage">
+            <Selecteur
+              valeur={source}
+              onChange={setSource}
+              options={[
+                { valeur: 'type', libelle: 'Planning type' },
+                {
+                  valeur: 'reparation',
+                  libelle: reparationDuJour ? 'Journée réparée' : 'Journée réparée (aucune)',
+                },
+              ]}
+            />
+          </Champ>
+        </div>
+        <Bouton icone={Printer} onClick={imprimer}>
+          Imprimer
+        </Bouton>
+      </div>
+
+      {source === 'reparation' && !reparationDuJour && (
+        <Bandeau ton="info" icone={Info} titre="Aucune journée réparée pour ce jour">
+          Passez par l’écran Journée : saisissez la date et les absences, puis lancez la réparation.
+        </Bandeau>
+      )}
+
+      {conflits.length > 0 && (
+        <Bandeau ton="alerte" icone={CircleAlert} titre={`${conflits.length} créneau(x) sans solution`}>
+          {conflits.map((c) => (
+            <p key={c.creneauId}>{c.message}</p>
+          ))}
+        </Bandeau>
+      )}
+
+      <div className="chemin-impression">
+        <Carte
+          className="zone-impression"
+          titre={`${jourAffiche.charAt(0).toUpperCase()}${jourAffiche.slice(1)} — ${montreReparation ? 'journée réparée' : 'planning type'}`}
+          sousTitre={
+            montreReparation
+              ? `${reparationDuJour.changements.length} changement(s), coût ${reparationDuJour.cout}`
+              : `${planning.creneaux.length} créneaux, ${referentiel.grille.nbPas} pas de ${referentiel.grille.pasMinutes} min`
+          }
+        >
+          <Grille
+            referentiel={referentiel}
+            planning={planning}
+            axe={axe}
+            signalements={signalements}
+            onCreneau={setCreneauOuvert}
+          />
+        </Carte>
+      </div>
+
+      <div className="no-print grid gap-4 lg:grid-cols-2">
+        <Carte titre="Salles libres" sousTitre="La grille des salles moins ce qui les occupe, pas par pas">
+          <div className="space-y-1">
+            {libres.map((c) => (
+              <div key={c.pas} className="flex items-baseline gap-3 text-sm">
+                <span className="w-12 shrink-0" style={{ fontFamily: F_MONO, color: 'var(--ink-soft)' }}>
+                  {c.heure}
+                </span>
+                <span style={{ color: c.libres.length === 0 ? 'var(--crisis)' : 'var(--ink)' }}>
+                  {c.libres.length === 0
+                    ? 'aucune salle libre'
+                    : c.libres.map((id) => referentiel.salle(id)?.nom ?? id).join(', ')}
+                </span>
+              </div>
+            ))}
+          </div>
+        </Carte>
+
+        <Carte
+          titre="Jeunes sans affectation"
+          sousTitre="Présents ce jour-là, sur aucun créneau — hors pause"
+        >
+          {oublies.length === 0 ? (
+            <Vide>Chaque jeune présent est affecté sur toute sa journée.</Vide>
+          ) : (
+            <div className="space-y-1.5">
+              {oublies.map((o) => (
+                <div key={o.jeuneId} className="flex items-baseline gap-3 text-sm">
+                  <span className="w-16 shrink-0" style={{ fontWeight: 600, color: 'var(--ink)' }}>
+                    {referentiel.libelleJeune(o.jeuneId)}
+                  </span>
+                  <span style={{ fontFamily: F_MONO, color: 'var(--ink-soft)' }}>
+                    {o.pas.map((p) => referentiel.grille.heureDePas(p)).join(' · ')}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Carte>
+      </div>
+
+      {violations.length > 0 && (
+        <Carte
+          className="no-print"
+          titre={`${violations.length} règle(s) violée(s)`}
+          sousTitre="Les règles dures d’abord : elles ne devraient jamais apparaître ici"
+        >
+          <div className="space-y-1.5">
+            {[...violations]
+              .sort((a, b) => Number(b.dure) - Number(a.dure))
+              .map((v, i) => (
+                <div
+                  key={`${v.regleId}-${i}`}
+                  className="rounded-lg border px-3 py-2 text-sm"
+                  style={{ borderColor: v.dure ? 'var(--crisis)' : 'var(--border)' }}
+                >
+                  <span style={{ fontFamily: F_MONO, color: 'var(--ink-soft)' }}>
+                    {v.regleId} · {v.type} · {v.dure ? 'dure' : `souple (coût ${v.cout})`}
+                  </span>
+                  <br />
+                  <span style={{ color: 'var(--ink)' }}>{v.message}</span>
+                </div>
+              ))}
+          </div>
+        </Carte>
+      )}
+
+      {creneauOuvert && (
+        <DetailCreneau
+          referentiel={referentiel}
+          planning={planning}
+          creneauId={creneauOuvert}
+          violations={violations.filter((v) => v.creneaux.includes(creneauOuvert))}
+          conflit={conflits.find((c) => c.creneauId === creneauOuvert)}
+          onFermer={() => setCreneauOuvert(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ==================== Écran Journée ====================
+   Le fichier jour.json : absences, renforts, épingles. Il ne circule pas —
+   c'est le seul endroit où l'on saisit ce qui change aujourd'hui. */
+
+function LigneAbsence({ referentiel, absence, index, onChange, onSupprimer }) {
+  const gens =
+    absence.type === 'jeune'
+      ? referentiel.structure.jeunes.map((j) => ({ valeur: j.id, libelle: j.initiales }))
+      : referentiel.structure.educateurs.map((e) => ({ valeur: e.id, libelle: referentiel.libelleEducateur(e.id) }));
+
+  const journee = absence.journee === true;
+
+  return (
+    <div className="flex flex-wrap items-end gap-2 rounded-xl border p-3" style={{ borderColor: 'var(--border)' }}>
+      <div className="w-32">
+        <Champ libelle="Qui">
+          <Selecteur
+            valeur={absence.type}
+            onChange={(type) => onChange(index, { type, id: '', journee: true })}
+            options={[
+              { valeur: 'educateur', libelle: 'Éducateur' },
+              { valeur: 'jeune', libelle: 'Jeune' },
+            ]}
+          />
+        </Champ>
+      </div>
+      <div className="w-44">
+        <Champ libelle="Personne">
+          <Selecteur
+            valeur={absence.id}
+            onChange={(id) => onChange(index, { ...absence, id })}
+            options={[{ valeur: '', libelle: '— choisir —' }, ...gens]}
+          />
+        </Champ>
+      </div>
+      <div className="w-40">
+        <Champ libelle="Étendue">
+          <Selecteur
+            valeur={journee ? 'journee' : 'partielle'}
+            onChange={(v) =>
+              onChange(
+                index,
+                v === 'journee'
+                  ? { type: absence.type, id: absence.id, journee: true, ...(absence.motif ? { motif: absence.motif } : {}) }
+                  : {
+                      type: absence.type,
+                      id: absence.id,
+                      debut: absence.debut ?? referentiel.structure.grille.debut,
+                      fin: absence.fin ?? referentiel.structure.grille.fin,
+                      ...(absence.motif ? { motif: absence.motif } : {}),
+                    },
+              )
+            }
+            options={[
+              { valeur: 'journee', libelle: 'Journée entière' },
+              { valeur: 'partielle', libelle: 'Sur une plage' },
+            ]}
+          />
+        </Champ>
+      </div>
+      {!journee && (
+        <>
+          <div className="w-28">
+            <Champ libelle="De">
+              <input
+                type="time"
+                step="1800"
+                className="w-full rounded-xl border px-3 py-2 text-sm"
+                style={styleSaisie}
+                value={absence.debut ?? ''}
+                onChange={(e) => onChange(index, { ...absence, debut: e.target.value })}
+              />
+            </Champ>
+          </div>
+          <div className="w-28">
+            <Champ libelle="À">
+              <input
+                type="time"
+                step="1800"
+                className="w-full rounded-xl border px-3 py-2 text-sm"
+                style={styleSaisie}
+                value={absence.fin ?? ''}
+                onChange={(e) => onChange(index, { ...absence, fin: e.target.value })}
+              />
+            </Champ>
+          </div>
+        </>
+      )}
+      <div className="min-w-[10rem] flex-1">
+        <Champ libelle="Motif">
+          <input
+            type="text"
+            className="w-full rounded-xl border px-3 py-2 text-sm"
+            style={styleSaisie}
+            value={absence.motif ?? ''}
+            placeholder="facultatif"
+            onChange={(e) => {
+              const motif = e.target.value;
+              const suite = { ...absence };
+              if (motif) suite.motif = motif;
+              else delete suite.motif;
+              onChange(index, suite);
+            }}
+          />
+        </Champ>
+      </div>
+      <Bouton variante="danger" icone={Trash2} onClick={() => onSupprimer(index)} aria-label="Supprimer cette absence">
+        Retirer
+      </Bouton>
+    </div>
+  );
+}
+
+function EcranJournee({ referentiel, jour, setJour, reparation, lancerReparation, validationJour, options }) {
+  const jourSemaine = useMemo(() => {
+    try {
+      return jourDeLaDate(jour.date);
+    } catch {
+      return null;
+    }
+  }, [jour.date]);
+
+  const dansLaGrille = jourSemaine && referentiel.structure.grille.jours.includes(jourSemaine);
+
+  const majAbsence = (index, valeur) =>
+    setJour({ ...jour, absences: jour.absences.map((a, i) => (i === index ? valeur : a)) });
+  const supprimerAbsence = (index) =>
+    setJour({ ...jour, absences: jour.absences.filter((_, i) => i !== index) });
+  const ajouterAbsence = () =>
+    setJour({ ...jour, absences: [...jour.absences, { type: 'educateur', id: '', journee: true }] });
+
+  const renforts = referentiel.structure.educateurs.filter((e) => e.statut === 'renfort');
+  const creneauxDuJour = jourSemaine ? referentiel.creneauxTypeDuJour(jourSemaine) : [];
+
+  const absencesCompletes = jour.absences.every((a) => a.id);
+
+  return (
+    <div className="space-y-4">
+      <Carte titre="La journée" sousTitre="Ces informations ne quittent pas le poste : jour.json ne circule pas.">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="w-52">
+            <Champ libelle="Date" aide={jourSemaine ? classeDate(jour.date) : 'date invalide'}>
+              <input
+                type="date"
+                className="w-full rounded-xl border px-3 py-2 text-sm"
+                style={styleSaisie}
+                value={jour.date}
+                onChange={(e) => setJour({ ...jour, date: e.target.value })}
+              />
+            </Champ>
+          </div>
+          <div className="w-40">
+            <Champ libelle="Structure" aide={`chargée : v${referentiel.structure.meta.version}`}>
+              <input
+                type="number"
+                min="1"
+                className="w-full rounded-xl border px-3 py-2 text-sm"
+                style={styleSaisie}
+                value={jour.structureVersion}
+                onChange={(e) => setJour({ ...jour, structureVersion: Number(e.target.value) })}
+              />
+            </Champ>
+          </div>
+          <Bouton
+            variante="primaire"
+            icone={RefreshCw}
+            onClick={lancerReparation}
+            disabled={!dansLaGrille || !absencesCompletes}
+          >
+            Réparer la journée
+          </Bouton>
+        </div>
+
+        {!dansLaGrille && (
+          <div className="mt-3">
+            <Bandeau ton="alerte" icone={AlertTriangle} titre="Jour hors grille">
+              {jourSemaine
+                ? `Le ${jour.date} tombe un ${jourSemaine}, qui n’est pas un jour d’accueil de cette structure.`
+                : 'Date illisible.'}
+            </Bandeau>
+          </div>
+        )}
+        {dansLaGrille && !absencesCompletes && (
+          <div className="mt-3">
+            <Bandeau ton="info" icone={Info} titre="Une absence n’a pas de personne">
+              Complétez ou retirez la ligne avant de lancer la réparation.
+            </Bandeau>
+          </div>
+        )}
+      </Carte>
+
+      <Carte
+        titre={`Absences (${jour.absences.length})`}
+        actions={<Bouton onClick={ajouterAbsence}>Ajouter</Bouton>}
+      >
+        {jour.absences.length === 0 ? (
+          <Vide>Personne d’absent : la journée est celle du planning type.</Vide>
+        ) : (
+          <div className="space-y-2">
+            {jour.absences.map((a, i) => (
+              <LigneAbsence
+                key={i}
+                referentiel={referentiel}
+                absence={a}
+                index={i}
+                onChange={majAbsence}
+                onSupprimer={supprimerAbsence}
+              />
+            ))}
+          </div>
+        )}
+      </Carte>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Carte titre="Renforts du jour" sousTitre="Un renfort n’est mobilisable que s’il est coché ici">
+          {renforts.length === 0 ? (
+            <Vide>Aucun éducateur de statut « renfort » dans la structure.</Vide>
+          ) : (
+            <div className="space-y-1.5">
+              {renforts.map((e) => {
+                const actif = (jour.renfortsDuJour ?? []).includes(e.id);
+                return (
+                  <label key={e.id} className="flex items-center gap-2 text-sm" style={{ color: 'var(--ink)' }}>
+                    <input
+                      type="checkbox"
+                      checked={actif}
+                      onChange={() =>
+                        setJour({
+                          ...jour,
+                          renfortsDuJour: actif
+                            ? (jour.renfortsDuJour ?? []).filter((id) => id !== e.id)
+                            : [...(jour.renfortsDuJour ?? []), e.id],
+                        })
+                      }
+                    />
+                    {referentiel.libelleEducateur(e.id)}
+                    <span className="text-xs" style={{ color: 'var(--ink-soft)', fontFamily: F_MONO }}>
+                      {Object.keys(e.disponibilites).join(', ') || 'aucune disponibilité'}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </Carte>
+
+        <Carte
+          titre="Créneaux épinglés"
+          sousTitre="Intouchables aujourd’hui seulement — le moteur contourne au lieu d’y puiser"
+        >
+          {creneauxDuJour.length === 0 ? (
+            <Vide>Aucun créneau ce jour-là dans le planning type.</Vide>
+          ) : (
+            <div className="max-h-64 space-y-1 overflow-y-auto">
+              {creneauxDuJour.map((c) => {
+                const epingle = (jour.epingles ?? []).includes(c.id);
+                return (
+                  <label key={c.id} className="flex items-center gap-2 text-sm" style={{ color: 'var(--ink)' }}>
+                    <input
+                      type="checkbox"
+                      checked={epingle}
+                      onChange={() =>
+                        setJour({
+                          ...jour,
+                          epingles: epingle
+                            ? (jour.epingles ?? []).filter((id) => id !== c.id)
+                            : [...(jour.epingles ?? []), c.id],
+                        })
+                      }
+                    />
+                    <span style={{ fontFamily: F_MONO, color: 'var(--ink-soft)' }}>{c.debut}</span>
+                    {referentiel.activite(c.activiteId)?.nom ?? c.activiteId}
+                    {c.verrouille && <Pin size={12} aria-label="déjà verrouillé dans la structure" />}
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </Carte>
+      </div>
+
+      {validationJour && validationJour.problemes.length > 0 && (
+        <Carte titre="Contrôle du fichier du jour">
+          <ListeProblemes problemes={validationJour.problemes} />
+        </Carte>
+      )}
+
+      {reparation && <ResultatReparation referentiel={referentiel} reparation={reparation} options={options} />}
+    </div>
+  );
+}
+
+function ResultatReparation({ referentiel, reparation }) {
+  const violationsDures = reparation.violations.filter((v) => v.dure);
+  const violationsSouples = reparation.violations.filter((v) => !v.dure);
+
+  return (
+    <Carte
+      titre="Résultat"
+      sousTitre={`coût total ${reparation.cout}`}
+      actions={
+        <Badge couleur={reparation.admissible ? CAT_TEAL : CAT_CORAL}>
+          {reparation.admissible ? 'admissible' : 'non admissible'}
+        </Badge>
+      }
+    >
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Statistique valeur={reparation.changements.length} libelle="changements" />
+        <Statistique
+          valeur={reparation.jeunesImpactes.length}
+          libelle="jeunes impactés"
+          detail={reparation.jeunesImpactes.map((id) => referentiel.libelleJeune(id)).join(', ')}
+        />
+        <Statistique
+          valeur={reparation.conflits.length}
+          libelle="conflits"
+          alerte={reparation.conflits.length > 0}
+        />
+      </div>
+
+      {reparation.conflits.length > 0 && (
+        <div className="mt-4">
+          <Bandeau ton="alerte" icone={CircleAlert} titre="Créneaux sans solution">
+            <p className="mb-2">
+              Le moteur n’a rien trouvé qui ne viole pas une règle dure. Il le signale plutôt que de passer outre.
+            </p>
+            {reparation.conflits.map((c) => (
+              <p key={c.creneauId}>{c.message}</p>
+            ))}
+          </Bandeau>
+        </div>
+      )}
+
+      {reparation.changements.length > 0 && (
+        <div className="mt-4">
+          <Etiquette>Ce que le moteur a fait</Etiquette>
+          <div className="mt-1.5 space-y-1">
+            {reparation.changements.map((c, i) => (
+              <div key={i} className="flex flex-wrap items-baseline gap-2 text-sm">
+                <span
+                  className="rounded px-1.5 text-[11px] uppercase"
+                  style={{ fontFamily: F_MONO, background: 'var(--accent-wash)', color: 'var(--ink)' }}
+                >
+                  {c.action}
+                </span>
+                <span style={{ color: 'var(--ink)', fontWeight: 600 }}>{referentiel.libelleEducateur(c.educateurId)}</span>
+                <span style={{ color: 'var(--ink-soft)' }}>→ {c.creneauId}</span>
+                <span className="text-xs" style={{ color: 'var(--ink-soft)' }}>
+                  {c.motif} · coût {c.cout}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {violationsDures.length > 0 && (
+        <div className="mt-4">
+          <Bandeau ton="alerte" icone={AlertTriangle} titre="Règles dures violées">
+            Elles ne devraient jamais apparaître ici : le planning type en violait déjà avant réparation.
+            {violationsDures.map((v, i) => (
+              <p key={i}>
+                {v.regleId} — {v.message}
+              </p>
+            ))}
+          </Bandeau>
+        </div>
+      )}
+
+      {violationsSouples.length > 0 && (
+        <div className="mt-4">
+          <Etiquette>Règles souples non tenues ({violationsSouples.length})</Etiquette>
+          <div className="mt-1.5 space-y-1 text-sm">
+            {violationsSouples.map((v, i) => (
+              <p key={i} style={{ color: 'var(--ink)' }}>
+                <span style={{ fontFamily: F_MONO, color: 'var(--ink-soft)' }}>
+                  {v.regleId} (coût {v.cout})
+                </span>{' '}
+                {v.message}
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
+    </Carte>
+  );
+}
+
+function Statistique({ valeur, libelle, detail, alerte }) {
+  return (
+    <div className="rounded-xl border p-3" style={{ borderColor: alerte ? 'var(--crisis)' : 'var(--border)' }}>
+      <div
+        className="text-2xl"
+        style={{ fontFamily: F_DISPLAY, fontWeight: 600, color: alerte ? 'var(--crisis)' : 'var(--ink)' }}
+      >
+        {valeur}
+      </div>
+      <div className="text-sm" style={{ color: 'var(--ink-soft)' }}>
+        {libelle}
+      </div>
+      {detail && (
+        <div className="mt-1 text-xs" style={{ color: 'var(--ink-soft)' }}>
+          {detail}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ==================== Écran Règles ====================
+   Ajouter une règle, c'est ajouter une entrée dans structure.json — pas
+   toucher au code. Cet écran édite ce qui se change le plus souvent en
+   réunion (activer, désactiver, repondérer) et montre le reste tel qu'il est
+   écrit dans le fichier. */
+
+const LIBELLES_CIBLES = {
+  jeunes: 'jeunes',
+  educateurs: 'éducateurs',
+  groupes: 'groupes',
+  activites: 'activités',
+  salles: 'salles',
+};
+
+function nomDeCible(referentiel, cle, id) {
+  if (cle === 'jeunes') return referentiel.libelleJeune(id);
+  if (cle === 'educateurs') return referentiel.libelleEducateur(id);
+  if (cle === 'groupes') return referentiel.groupes.get(id)?.nom ?? id;
+  if (cle === 'activites') return referentiel.activite(id)?.nom ?? id;
+  if (cle === 'salles') return referentiel.salle(id)?.nom ?? id;
+  return id;
+}
+
+function CarteRegle({ referentiel, regle, index, onChange }) {
+  const evaluateur = catalogue().find((e) => e.type === regle.type);
+  const inconnue = !evaluateur;
+
+  return (
+    <div
+      className="rounded-xl border p-4"
+      style={{
+        borderColor: inconnue ? 'var(--crisis)' : 'var(--border)',
+        opacity: regle.actif ? 1 : 0.55,
+      }}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <code className="text-xs" style={{ fontFamily: F_MONO, color: 'var(--ink-soft)' }}>
+              {regle.id}
+            </code>
+            <span style={{ fontFamily: F_DISPLAY, fontWeight: 600, color: 'var(--ink)' }}>{regle.type}</span>
+            <Badge couleur={regle.dure ? CAT_CORAL : CAT_ARDOISE}>
+              {regle.dure ? 'dure' : `souple · ${regle.poids ?? 'poids par défaut'}`}
+            </Badge>
+            {inconnue && <Badge couleur={CAT_CORAL}>type inconnu</Badge>}
+          </div>
+          {regle.commentaire ? (
+            <p className="mt-1 text-sm" style={{ color: 'var(--ink)' }}>
+              {regle.commentaire}
+            </p>
+          ) : (
+            <p className="mt-1 text-sm" style={{ color: 'var(--crisis)' }}>
+              Sans commentaire — dans six mois, personne ne saura pourquoi cette règle existe.
+            </p>
+          )}
+        </div>
+
+        <label className="flex shrink-0 items-center gap-2 text-sm" style={{ color: 'var(--ink)' }}>
+          <input
+            type="checkbox"
+            checked={regle.actif}
+            onChange={() => onChange(index, { ...regle, actif: !regle.actif })}
+          />
+          active
+        </label>
+      </div>
+
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div>
+          <Etiquette>Cibles</Etiquette>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {Object.entries(regle.cibles ?? {}).flatMap(([cle, ids]) =>
+              (ids ?? []).map((id) => (
+                <Badge key={`${cle}-${id}`} couleur={CAT_INDIGO} titre={LIBELLES_CIBLES[cle] ?? cle}>
+                  {nomDeCible(referentiel, cle, id)}
+                </Badge>
+              )),
+            )}
+            {Object.values(regle.cibles ?? {}).every((v) => (v ?? []).length === 0) && (
+              <span className="text-sm" style={{ color: 'var(--ink-soft)' }}>
+                aucune
+              </span>
+            )}
+          </div>
+        </div>
+        <div>
+          <Etiquette>Paramètres</Etiquette>
+          <pre
+            className="mt-1 overflow-x-auto rounded-lg border p-2 text-xs"
+            style={{ fontFamily: F_MONO, borderColor: 'var(--border)', color: 'var(--ink)' }}
+          >
+            {JSON.stringify(regle.params ?? {}, null, 1)}
+          </pre>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-end gap-3">
+        <div className="w-40">
+          <Champ libelle="Nature">
+            <Selecteur
+              valeur={regle.dure ? 'dure' : 'souple'}
+              onChange={(v) => {
+                const suite = { ...regle, dure: v === 'dure' };
+                if (suite.dure) delete suite.poids;
+                else if (suite.poids === undefined) suite.poids = 50;
+                onChange(index, suite);
+              }}
+              options={[
+                { valeur: 'dure', libelle: 'Dure — jamais violée' },
+                { valeur: 'souple', libelle: 'Souple — négociable' },
+              ]}
+            />
+          </Champ>
+        </div>
+        {!regle.dure && (
+          <div className="w-32">
+            <Champ libelle="Poids" aide="plus il est élevé, plus la violation coûte">
+              <input
+                type="number"
+                min="0"
+                className="w-full rounded-xl border px-3 py-2 text-sm"
+                style={styleSaisie}
+                value={regle.poids ?? 50}
+                onChange={(e) => onChange(index, { ...regle, poids: Number(e.target.value) })}
+              />
+            </Champ>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function EcranRegles({ referentiel, structure, setStructure, validation }) {
+  const regles = structure.regles;
+  const majRegle = (index, valeur) =>
+    setStructure({ ...structure, regles: regles.map((r, i) => (i === index ? valeur : r)) });
+
+  const problemesDeRegles = (validation?.problemes ?? []).filter((p) => p.chemin.startsWith('/regles'));
+
+  return (
+    <div className="space-y-4">
+      <Carte
+        titre={`${regles.length} règle(s)`}
+        sousTitre={`${regles.filter((r) => r.actif).length} active(s) · ${regles.filter((r) => r.dure).length} dure(s)`}
+      >
+        <Bandeau ton="info" icone={Info} titre="Ce que cet écran modifie">
+          Activation, nature (dure / souple) et poids — ce qui se rediscute en réunion. Les cibles et les
+          paramètres se modifient dans le fichier : ils engagent la sémantique de la règle, pas son arbitrage.
+          Toute modification doit être exportée pour être conservée.
+        </Bandeau>
+      </Carte>
+
+      {problemesDeRegles.length > 0 && (
+        <Carte titre="Règles mal configurées">
+          <ListeProblemes problemes={problemesDeRegles} />
+        </Carte>
+      )}
+
+      <div className="space-y-3">
+        {regles.map((r, i) => (
+          <CarteRegle key={r.id} referentiel={referentiel} regle={r} index={i} onChange={majRegle} />
+        ))}
+      </div>
+
+      <Carte titre="Types disponibles" sousTitre="Ajouter un type demande du code ; ajouter une règle, non.">
+        <div className="flex flex-wrap gap-1.5">
+          {catalogue().map((e) => (
+            <Badge key={e.type} couleur={e.dureParDefaut ? CAT_CORAL : CAT_ARDOISE} titre={e.dureParDefaut ? 'dure par défaut' : 'souple par défaut'}>
+              {e.type}
+            </Badge>
+          ))}
+        </div>
+      </Carte>
+    </div>
+  );
+}
+
+/* ==================== Écran Structure ====================
+   Lecture seule : le fichier reste la source. On regarde ce qui a été chargé,
+   on ne le retape pas ici. */
+
+function Table({ colonnes, lignes }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
+        <thead>
+          <tr>
+            {colonnes.map((c) => (
+              <th
+                key={c}
+                className="border-b px-2 py-1.5 text-left"
+                style={{ borderColor: 'var(--border)', color: 'var(--ink-soft)', fontFamily: F_MONO, fontWeight: 500 }}
+              >
+                {c}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {lignes.map((ligne, i) => (
+            <tr key={i}>
+              {ligne.map((cellule, k) => (
+                <td key={k} className="border-b px-2 py-1.5" style={{ borderColor: 'var(--border)', color: 'var(--ink)' }}>
+                  {cellule}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function semaineEnTexte(semaine) {
+  const entrees = Object.entries(semaine ?? {});
+  if (entrees.length === 0) return '—';
+  return entrees.map(([jour, p]) => `${jour.slice(0, 3)} ${p.debut}–${p.fin}`).join(' · ');
+}
+
+function EcranStructure({ referentiel, structure }) {
+  const s = structure;
+  return (
+    <div className="space-y-4">
+      <Carte titre="Fichier" sousTitre={s.meta.libelle ?? ''}>
+        <Table
+          colonnes={['version', 'modifié le', 'auteur', 'établissement']}
+          lignes={[[`v${s.meta.version}`, s.meta.dateModification, s.meta.auteur, s.meta.etablissement]]}
+        />
+      </Carte>
+
+      <Carte
+        titre="Grille"
+        sousTitre={`${referentiel.grille.nbPas} pas de ${s.grille.pasMinutes} min, ${s.grille.debut} – ${s.grille.fin}`}
+      >
+        <p className="text-sm" style={{ color: 'var(--ink)' }}>
+          Jours : {s.grille.jours.join(', ')}
+        </p>
+        <p className="mt-1 text-sm" style={{ color: 'var(--ink-soft)' }}>
+          Pauses :{' '}
+          {(s.grille.pauses ?? []).length === 0
+            ? 'aucune'
+            : s.grille.pauses.map((p) => `${p.libelle} ${p.debut} (${p.pas} pas)`).join(' · ')}
+        </p>
+      </Carte>
+
+      <Carte titre={`Jeunes (${s.jeunes.length})`}>
+        <Table
+          colonnes={['initiales', 'groupe', 'encadrement', 'présence', '']}
+          lignes={s.jeunes.map((j) => [
+            j.initiales,
+            referentiel.groupes.get(j.groupeId)?.nom ?? '—',
+            j.encadrement,
+            semaineEnTexte(j.presence),
+            j.actif ? '' : 'inactif',
+          ])}
+        />
+      </Carte>
+
+      <Carte titre={`Éducateurs (${s.educateurs.length})`}>
+        <Table
+          colonnes={['nom', 'statut', 'détachable', 'disponibilités', '']}
+          lignes={s.educateurs.map((e) => [
+            referentiel.libelleEducateur(e.id),
+            e.statut,
+            e.detachable ? 'oui' : 'non',
+            semaineEnTexte(e.disponibilites),
+            e.actif ? '' : 'inactif',
+          ])}
+        />
+      </Carte>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Carte titre={`Salles (${s.salles.length})`}>
+          <Table
+            colonnes={['nom', 'capacité', 'tags']}
+            lignes={s.salles.map((sa) => [sa.nom, sa.capacite, (sa.tags ?? []).join(', ') || '—'])}
+          />
+        </Carte>
+        <Carte titre={`Groupes (${s.groupes.length})`}>
+          <Table
+            colonnes={['nom', 'éducateurs de référence', 'jeunes']}
+            lignes={s.groupes.map((g) => [
+              g.nom,
+              (g.refEducateurs ?? []).map((id) => referentiel.libelleEducateur(id)).join(', ') || '—',
+              referentiel.jeunesDuGroupe(g.id).map((j) => j.initiales).join(', ') || '—',
+            ])}
+          />
+        </Carte>
+      </div>
+
+      <Carte titre={`Activités (${s.activites.length})`}>
+        <Table
+          colonnes={['nom', 'durée', 'salles', 'capacité', 'éducateurs requis']}
+          lignes={s.activites.map((a) => [
+            a.nom,
+            `${a.dureePas} pas`,
+            (a.sallesPossibles ?? []).map((id) => referentiel.salle(id)?.nom ?? id).join(', ') || '—',
+            a.capaciteJeunes ?? '—',
+            a.educateursRequis ?? 'déduit de l’encadrement',
+          ])}
+        />
+      </Carte>
+    </div>
+  );
+}
+
+/* ==================== Écran Fichiers ==================== */
+
+function telecharger(nom, contenu) {
+  const blob = new Blob([contenu], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nom;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function ZoneDepot({ libelle, aide, onFichier }) {
+  const [survol, setSurvol] = useState(false);
+  const entree = useRef(null);
+
+  const lire = (fichier) => {
+    if (!fichier) return;
+    const lecteur = new FileReader();
+    lecteur.onload = () => onFichier(String(lecteur.result), fichier.name);
+    lecteur.readAsText(fichier);
+  };
+
+  return (
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        setSurvol(true);
+      }}
+      onDragLeave={() => setSurvol(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setSurvol(false);
+        lire(e.dataTransfer.files?.[0]);
+      }}
+      className="rounded-xl border border-dashed p-6 text-center"
+      style={{ borderColor: survol ? 'var(--accent)' : 'var(--border)', background: survol ? 'var(--accent-wash)' : 'transparent' }}
+    >
+      <Upload size={20} style={{ color: 'var(--ink-soft)' }} className="mx-auto" aria-hidden="true" />
+      <p className="mt-2 text-sm" style={{ color: 'var(--ink)' }}>
+        {libelle}
+      </p>
+      <p className="mt-1 text-xs" style={{ color: 'var(--ink-soft)' }}>
+        {aide}
+      </p>
+      <input
+        ref={entree}
+        type="file"
+        accept="application/json,.json"
+        className="hidden"
+        onChange={(e) => {
+          lire(e.target.files?.[0]);
+          e.target.value = '';
+        }}
+      />
+      <div className="mt-3">
+        <Bouton onClick={() => entree.current?.click()}>Choisir un fichier</Bouton>
+      </div>
+    </div>
+  );
+}
+
+function EcranFichiers({
+  structure,
+  referentiel,
+  validation,
+  jour,
+  validationJour,
+  chargerStructure,
+  chargerJour,
+  erreurStockage,
+}) {
+  const [messageStructure, setMessageStructure] = useState(null);
+  const [messageJour, setMessageJour] = useState(null);
+
+  const deposerStructure = (texte, nom) => {
+    let donnees;
+    try {
+      donnees = JSON.parse(texte);
+    } catch (e) {
+      setMessageStructure({ ton: 'alerte', texte: `${nom} n’est pas du JSON valide : ${e.message}` });
+      return;
+    }
+    const resultat = valideStructure(donnees);
+    if (!resultat.valide) {
+      setMessageStructure({
+        ton: 'alerte',
+        texte: `${nom} comporte ${resultat.problemes.filter((p) => p.gravite === 'erreur').length} erreur(s) — rien n’a été chargé.`,
+        problemes: resultat.problemes,
+      });
+      return;
+    }
+    /* Refus d'une version antérieure, avec possibilité de forcer : c'est la
+       règle d'usage de la spécification, et c'est le seul garde-fou contre
+       deux personnes qui travaillent sur deux versions différentes. */
+    if (structure && donnees.meta.version < structure.meta.version) {
+      const forcer = window.confirm(
+        `Ce fichier est en v${donnees.meta.version}, or la structure chargée est en v${structure.meta.version}.\n\n` +
+          'Charger quand même ? La version en place sera remplacée.',
+      );
+      if (!forcer) {
+        setMessageStructure({ ton: 'info', texte: 'Chargement annulé : version antérieure.' });
+        return;
+      }
+    }
+    chargerStructure(donnees);
+    setMessageStructure({
+      ton: 'succes',
+      texte: `${nom} chargé (v${donnees.meta.version}).`,
+      problemes: resultat.problemes,
+    });
+  };
+
+  const deposerJour = (texte, nom) => {
+    let donnees;
+    try {
+      donnees = JSON.parse(texte);
+    } catch (e) {
+      setMessageJour({ ton: 'alerte', texte: `${nom} n’est pas du JSON valide : ${e.message}` });
+      return;
+    }
+    const resultat = valideJour(referentiel, donnees);
+    if (!resultat.valide) {
+      setMessageJour({
+        ton: 'alerte',
+        texte: `${nom} n’est pas exploitable avec la structure chargée.`,
+        problemes: resultat.problemes,
+      });
+      return;
+    }
+    chargerJour(donnees);
+    setMessageJour({ ton: 'succes', texte: `${nom} chargé.`, problemes: resultat.problemes });
+  };
+
+  const exporterStructure = () => {
+    const version = window.prompt(
+      'Numéro de version pour l’export.\n\n' +
+        'Il s’incrémente à chaque envoi : c’est ce qui permet de refuser un fichier périmé à la réception.',
+      String(structure.meta.version + 1),
+    );
+    if (version === null) return;
+    const n = Number(version);
+    if (!Number.isInteger(n) || n < 1) {
+      window.alert('Version invalide : un entier positif est attendu.');
+      return;
+    }
+    const sortie = {
+      ...structure,
+      meta: { ...structure.meta, version: n, dateModification: aujourdhui() },
+    };
+    telecharger(`structure-v${n}.json`, `${JSON.stringify(sortie, null, 2)}\n`);
+  };
+
+  return (
+    <div className="space-y-4">
+      {erreurStockage && (
+        <Bandeau ton="alerte" icone={AlertTriangle} titre="Rien n’est conservé sur ce poste">
+          L’écriture dans le stockage du navigateur a échoué (navigation privée, quota, stockage désactivé).
+          L’application fonctionne, mais tout sera perdu à la fermeture de l’onglet : exportez avant de partir.
+        </Bandeau>
+      )}
+
+      <Carte
+        titre="structure.json"
+        sousTitre="Le fichier qui circule par mail — celui qui définit tout ce que le moteur sait faire"
+        actions={
+          structure && (
+            <Bouton icone={Download} onClick={exporterStructure}>
+              Exporter
+            </Bouton>
+          )
+        }
+      >
+        {structure ? (
+          <div className="mb-4">
+            <Table
+              colonnes={['version', 'modifié le', 'auteur', 'contenu']}
+              lignes={[
+                [
+                  `v${structure.meta.version}`,
+                  structure.meta.dateModification,
+                  structure.meta.auteur,
+                  `${structure.jeunes.length} jeunes · ${structure.educateurs.length} éducateurs · ${structure.planningType.length} créneaux · ${structure.regles.length} règles`,
+                ],
+              ]}
+            />
+          </div>
+        ) : (
+          <div className="mb-4">
+            <Bandeau ton="info" icone={Info} titre="Aucun planning chargé">
+              L’application est livrée vide : elle ne connaît ni vos jeunes, ni vos éducateurs, ni vos
+              salles tant que vous ne lui avez rien donné. Déposez un <code style={{ fontFamily: F_MONO }}>structure.json</code>{' '}
+              pour commencer.
+            </Bandeau>
+          </div>
+        )}
+
+        <ZoneDepot
+          libelle="Déposer un structure.json"
+          aide="Le fichier est validé avant d’être chargé : en cas d’erreur, rien n’est remplacé."
+          onFichier={deposerStructure}
+        />
+
+        {messageStructure && (
+          <div className="mt-3 space-y-3">
+            <Bandeau
+              ton={messageStructure.ton}
+              icone={messageStructure.ton === 'alerte' ? AlertTriangle : messageStructure.ton === 'succes' ? Check : Info}
+            >
+              {messageStructure.texte}
+            </Bandeau>
+            {messageStructure.problemes?.length > 0 && <ListeProblemes problemes={messageStructure.problemes} />}
+          </div>
+        )}
+      </Carte>
+
+      {structure && (
+        <Carte
+          titre="jour.json"
+          sousTitre="Absences et retouches du jour — ne circule pas"
+          actions={
+            <Bouton
+              icone={Download}
+              onClick={() => telecharger(`jour-${jour.date}.json`, `${JSON.stringify(jour, null, 2)}\n`)}
+            >
+              Exporter
+            </Bouton>
+          }
+        >
+          <ZoneDepot
+            libelle="Déposer un jour.json"
+            aide="Refusé s’il a été construit sur une autre version de la structure."
+            onFichier={deposerJour}
+          />
+          {messageJour && (
+            <div className="mt-3 space-y-3">
+              <Bandeau
+                ton={messageJour.ton}
+                icone={messageJour.ton === 'alerte' ? AlertTriangle : Check}
+              >
+                {messageJour.texte}
+              </Bandeau>
+              {messageJour.problemes?.length > 0 && <ListeProblemes problemes={messageJour.problemes} />}
+            </div>
+          )}
+        </Carte>
+      )}
+
+      {structure && validation && (
+        <Carte
+          titre="Contrôle de la structure chargée"
+          sousTitre="Les erreurs bloquent, les avertissements non"
+        >
+          <ListeProblemes problemes={validation.problemes} />
+        </Carte>
+      )}
+
+      <Carte titre="Import CSV" sousTitre="Pas encore branché">
+        <p className="text-sm" style={{ color: 'var(--ink)' }}>
+          Un CSV peut porter le planning type (une ligne par créneau), les listes (jeunes, éducateurs, salles,
+          activités) et les présences hebdomadaires. Il ne peut pas porter les règles : <code style={{ fontFamily: F_MONO }}>cibles</code>{' '}
+          et <code style={{ fontFamily: F_MONO }}>params</code> sont des objets imbriqués, un tableau à plat ne les
+          rend pas sans devenir illisible — elles restent saisies ici.
+        </p>
+        <p className="mt-2 text-sm" style={{ color: 'var(--ink-soft)' }}>
+          L’import passera par un écran de correspondance : un CSV dit « Marie Dupont », pas{' '}
+          <code style={{ fontFamily: F_MONO }}>e1</code>. Le lecteur sera écrit sur un fichier réel plutôt que sur
+          une supposition de format.
+        </p>
+      </Carte>
+    </div>
+  );
+}
+
+/* ==================== Écran Réglages ==================== */
+
+function CarteHorsLigne() {
+  const [etat, setEtat] = useState(null);
+
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    let vivant = true;
+    navigator.serviceWorker.ready
+      .then((registration) => {
+        const actif = registration.active;
+        if (!actif) return;
+        const canal = new MessageChannel();
+        canal.port1.onmessage = (e) => {
+          if (vivant) setEtat(e.data);
+        };
+        actif.postMessage({ type: 'etat' }, [canal.port2]);
+      })
+      .catch(() => {});
+    return () => {
+      vivant = false;
+    };
+  }, []);
+
+  return (
+    <Carte titre="Hors connexion" sousTitre="Ce que le poste sait servir sans réseau">
+      {!etat ? (
+        <Vide>
+          Aucun service worker actif. En développement, ou sans HTTPS, le mode hors connexion ne s’installe pas —
+          l’application fonctionne quand même.
+        </Vide>
+      ) : (
+        <p className="text-sm" style={{ color: 'var(--ink)' }}>
+          Version <code style={{ fontFamily: F_MONO }}>{etat.version}</code> — {etat.presents} fichier(s) en cache
+          sur {etat.attendus} attendus.
+          {etat.presents < etat.attendus && (
+            <span style={{ color: 'var(--crisis)' }}> Le cache est incomplet : rechargez la page en ligne.</span>
+          )}
+        </p>
+      )}
+    </Carte>
+  );
+}
+
+function EcranReglages({ options, setOptions, theme, setTheme, accent, setAccent }) {
+  const majCout = (cle, valeur) =>
+    setOptions({ ...options, couts: { ...options.couts, [cle]: Number(valeur) } });
+
+  return (
+    <div className="space-y-4">
+      <Carte
+        titre="Arbitrages du moteur"
+        sousTitre="Les trois points laissés ouverts par la spécification — ils se règlent ici, pas dans le code"
+      >
+        <div className="grid gap-4 md:grid-cols-3">
+          <Champ
+            libelle="Priorité de réparation"
+            aide="Ce qu’on préfère préserver quand il faut choisir"
+          >
+            <Selecteur
+              valeur={options.priorite}
+              onChange={(priorite) => setOptions(optionsAvec({ ...options, priorite, couts: undefined }))}
+              options={[
+                { valeur: 'jeunes', libelle: 'Les jeunes d’abord' },
+                { valeur: 'educateurs', libelle: 'L’équipe d’abord' },
+              ]}
+            />
+          </Champ>
+
+          <Champ libelle="Détachement" aide="Un éducateur détaché est-il rappelable ?">
+            <Selecteur
+              valeur={options.detachement}
+              onChange={(detachement) => setOptions({ ...options, detachement })}
+              options={[
+                { valeur: 'mobilisable', libelle: 'Mobilisable, mais cher' },
+                { valeur: 'indisponible', libelle: 'Retiré du terrain' },
+                { valeur: 'libre', libelle: 'Sans effet' },
+              ]}
+            />
+          </Champ>
+
+          <Champ libelle="Encadrement" aide="Comment se calcule l’effectif requis">
+            <Selecteur
+              valeur={options.encadrement}
+              onChange={(encadrement) => setOptions({ ...options, encadrement })}
+              options={[
+                { valeur: 'individuel', libelle: 'Somme des encadrements' },
+                { valeur: 'ratioGroupe', libelle: 'Ratio par groupe' },
+              ]}
+            />
+          </Champ>
+        </div>
+
+        <div className="mt-4">
+          <Etiquette>Barème</Etiquette>
+          <p className="mb-2 mt-1 text-sm" style={{ color: 'var(--ink-soft)' }}>
+            Le barème suit la priorité choisie ; ces champs l’ajustent au cas par cas. « Créneau non résolu » doit
+            rester très au-dessus du reste : le moteur doit toujours préférer une journée bousculée à un groupe
+            sans encadrement.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            {[
+              ['jeuneImpacte', 'Jeune impacté'],
+              ['educateurDeplace', 'Éducateur déplacé'],
+              ['creneauModifie', 'Créneau modifié'],
+              ['creneauNonResolu', 'Créneau non résolu'],
+              ['mobilisationDetache', 'Rappel d’un détaché'],
+              ['recoursRenfort', 'Recours au renfort'],
+            ].map(([cle, libelle]) => (
+              <Champ key={cle} libelle={libelle}>
+                <input
+                  type="number"
+                  min="0"
+                  className="w-full rounded-xl border px-3 py-2 text-sm"
+                  style={styleSaisie}
+                  value={options.couts[cle]}
+                  onChange={(e) => majCout(cle, e.target.value)}
+                />
+              </Champ>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <Bouton onClick={() => setOptions(optionsAvec())} icone={RefreshCw}>
+            Revenir aux valeurs par défaut
+          </Bouton>
+        </div>
+      </Carte>
+
+      <Carte titre="Apparence" sousTitre="Le mode et la couleur sont deux réglages indépendants">
+        <div className="flex flex-wrap items-center gap-6">
+          <div>
+            <Etiquette>Mode</Etiquette>
+            <div className="mt-1.5 flex gap-2">
+              {[
+                { id: 'light', nom: 'Clair', icone: Sun },
+                { id: 'dark', nom: 'Sombre', icone: Moon },
+              ].map(({ id, nom, icone: Icone }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setTheme(id)}
+                  className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm"
+                  style={{
+                    borderColor: theme === id ? 'var(--accent)' : 'var(--border)',
+                    background: theme === id ? 'var(--accent-wash)' : 'transparent',
+                    color: 'var(--ink)',
+                  }}
+                  aria-pressed={theme === id}
+                >
+                  <Icone size={16} />
+                  {nom}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <Etiquette>Couleur</Etiquette>
+            <div className="mt-1.5 flex gap-2">
+              {ACCENTS.map((a) => (
+                <button
+                  key={a.nom}
+                  type="button"
+                  onClick={() => setAccent(a.id)}
+                  title={a.nom}
+                  aria-label={a.nom}
+                  aria-pressed={accent === a.id}
+                  className="h-9 w-9 rounded-xl border"
+                  style={{
+                    background: a.swatch,
+                    borderColor: accent === a.id ? 'var(--ink)' : 'var(--border)',
+                    borderWidth: accent === a.id ? 2 : 1,
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <p className="mt-3 text-sm" style={{ color: 'var(--ink-soft)' }}>
+          Ni le mode sombre ni la couleur ne partent à l’imprimante : un planning affiché au mur sort en neutre.
+        </p>
+      </Carte>
+
+      <CarteHorsLigne />
+
+      <Carte titre="Stockage" sousTitre="Ce que ce poste garde entre deux ouvertures">
+        <p className="text-sm" style={{ color: 'var(--ink)' }}>
+          La structure chargée, la journée en cours et ces réglages, dans le stockage local du navigateur, sous le
+          préfixe <code style={{ fontFamily: F_MONO }}>planning-ime:</code>.
+        </p>
+        <p className="mt-2 text-sm" style={{ color: 'var(--ink-soft)' }}>
+          Ce préfixe n’est pas cosmétique : cette application, DatABA et DatABA Manager partagent la même adresse,
+          donc le même stockage. Rien n’est effacé en dehors de ce préfixe.
+        </p>
+        <div className="mt-3">
+          <Bouton
+            variante="danger"
+            icone={Trash2}
+            onClick={() => {
+              if (!window.confirm('Effacer la structure, la journée et les réglages de ce poste ?')) return;
+              [CLE_STRUCTURE, CLE_JOUR, CLE_OPTIONS].forEach(effacerStockage);
+              window.location.reload();
+            }}
+          >
+            Vider ce poste
+          </Bouton>
+        </div>
+      </Carte>
+    </div>
+  );
+}
+
+/* ==================== Application ==================== */
+
+function jourVide(version) {
+  return {
+    structureVersion: version ?? 1,
+    date: aujourdhui(),
+    absences: [],
+    renfortsDuJour: [],
+    epingles: [],
+    affectationsManuelles: [],
+  };
+}
+
+export default function App() {
+  const [structure, setStructureEtat] = useState(() => lireStockage(CLE_STRUCTURE));
+  const [jour, setJourEtat] = useState(() => lireStockage(CLE_JOUR) ?? jourVide());
+  const [options, setOptionsEtat] = useState(() => optionsAvec(lireStockage(CLE_OPTIONS) ?? {}));
+  const [erreurStockage, setErreurStockage] = useState(false);
+
+  const [destination, setDestination] = useState(() => (lireStockage(CLE_STRUCTURE) ? 'planning' : 'fichiers'));
+  const [replie, setReplie] = useState(false);
+  const [theme, setTheme] = useState(() => document.documentElement.getAttribute('data-theme') ?? 'light');
+  const [accent, setAccent] = useState(() => document.documentElement.getAttribute('data-accent'));
+
+  const [reparation, setReparation] = useState(null);
+  const [jourAffiche, setJourAffiche] = useState(null);
+  const [axe, setAxe] = useState('salle');
+  const [sourcePlanning, setSourcePlanning] = useState('type');
+
+  /* Toute écriture est relue avant d'être annoncée réussie : un setItem qui ne
+     lève pas ne prouve rien (leçon de DatABA Manager). Un échec remonte à
+     l'écran plutôt que d'être avalé — sinon le poste rouvre vide sans que
+     personne n'ait rien vu passer. */
+  const persister = useCallback((cle, valeur) => {
+    if (!ecrireStockage(cle, valeur)) setErreurStockage(true);
+  }, []);
+
+  const setStructure = useCallback(
+    (valeur) => {
+      setStructureEtat(valeur);
+      persister(CLE_STRUCTURE, valeur);
+    },
+    [persister],
+  );
+
+  const setJour = useCallback(
+    (valeur) => {
+      setJourEtat(valeur);
+      persister(CLE_JOUR, valeur);
+    },
+    [persister],
+  );
+
+  const setOptions = useCallback(
+    (valeur) => {
+      const completes = optionsAvec(valeur);
+      setOptionsEtat(completes);
+      persister(CLE_OPTIONS, completes);
+    },
+    [persister],
+  );
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    ecrireStockage(CLE_THEME, theme);
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', theme === 'dark' ? '#0A1120' : '#F3F6FB');
+  }, [theme]);
+
+  useEffect(() => {
+    if (accent) {
+      document.documentElement.setAttribute('data-accent', accent);
+      ecrireStockage(CLE_ACCENT, accent);
+    } else {
+      document.documentElement.removeAttribute('data-accent');
+      effacerStockage(CLE_ACCENT);
+    }
+  }, [accent]);
+
+  /* Le référentiel est reconstruit à chaque changement de structure : c'est
+     lui qui porte les index. La structure a déjà été validée à l'import, mais
+     une structure venue du stockage d'une version antérieure de l'application
+     pourrait ne plus l'être — d'où le filet. */
+  const { referentiel, erreurReferentiel } = useMemo(() => {
+    if (!structure) return { referentiel: null, erreurReferentiel: null };
+    try {
+      return { referentiel: new Referentiel(structure), erreurReferentiel: null };
+    } catch (e) {
+      return { referentiel: null, erreurReferentiel: e instanceof Error ? e.message : String(e) };
+    }
+  }, [structure]);
+
+  const validation = useMemo(() => (structure ? valideStructure(structure) : null), [structure]);
+  const validationJour = useMemo(
+    () => (referentiel ? valideJour(referentiel, jour) : null),
+    [referentiel, jour],
+  );
+
+  /* Le jour affiché doit toujours être un jour d'accueil de la structure
+     chargée : sans ce recadrage, changer de structure laissait la grille sur
+     un jour absent et affichait une page blanche sans rien dire. */
+  useEffect(() => {
+    if (!referentiel) return;
+    const jours = referentiel.structure.grille.jours;
+    setJourAffiche((actuel) => (actuel && jours.includes(actuel) ? actuel : (jours[0] ?? null)));
+  }, [referentiel]);
+
+  /* Une réparation porte sur une structure et une journée données : dès que
+     l'une des deux bouge, le résultat affiché ne décrit plus rien. Mieux vaut
+     le retirer que laisser lire un planning périmé. */
+  useEffect(() => {
+    setReparation(null);
+    setSourcePlanning('type');
+  }, [structure, jour, options]);
+
+  const chargerStructure = useCallback(
+    (donnees) => {
+      setStructure(donnees);
+      setJour({ ...jourVide(donnees.meta.version), date: jour.date });
+      setDestination('planning');
+    },
+    [setStructure, setJour, jour.date],
+  );
+
+  const lancerReparation = useCallback(() => {
+    if (!referentiel) return;
+    try {
+      const resultat = repare(referentiel, jour, options);
+      setReparation(resultat);
+      setJourAffiche(resultat.planning.jour);
+      setSourcePlanning('reparation');
+    } catch (e) {
+      window.alert(`La réparation n’a pas abouti : ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }, [referentiel, jour, options]);
+
+  /* setReparation est appelé juste après l'effet qui le remet à null sur
+     changement de `jour` : React traite les deux dans le même passage et
+     l'effet, déclenché par la dépendance inchangée, ne s'exécute pas à
+     nouveau. Le résultat survit donc jusqu'à la prochaine modification réelle. */
+
+  const enTete = (
+    <header
+      className="no-print flex flex-wrap items-center justify-between gap-3 border-b px-6 py-3"
+      style={{ borderColor: 'var(--border)', background: 'var(--card)' }}
+    >
+      <div>
+        <h1 className="text-lg" style={{ fontFamily: F_DISPLAY, fontWeight: 600, color: 'var(--ink)' }}>
+          {DESTINATIONS.find((d) => d.id === destination)?.nom ?? 'Planning IME'}
+        </h1>
+        {structure && (
+          <p className="text-xs" style={{ color: 'var(--ink-soft)', fontFamily: F_MONO }}>
+            {structure.meta.etablissement} · v{structure.meta.version} · {structure.meta.libelle ?? ''}
+          </p>
+        )}
+      </div>
+      {validation && (
+        <div className="flex items-center gap-2">
+          {validation.problemes.filter((p) => p.gravite === 'erreur').length > 0 ? (
+            <Badge couleur={CAT_CORAL}>
+              {validation.problemes.filter((p) => p.gravite === 'erreur').length} erreur(s)
+            </Badge>
+          ) : validation.problemes.length > 0 ? (
+            <Badge couleur={CAT_AMBER}>{validation.problemes.length} avertissement(s)</Badge>
+          ) : (
+            <Badge couleur={CAT_TEAL}>fichier propre</Badge>
+          )}
+        </div>
+      )}
+    </header>
+  );
+
+  let contenu;
+  if (erreurReferentiel) {
+    contenu = (
+      <Bandeau ton="alerte" icone={AlertTriangle} titre="La structure enregistrée est illisible">
+        {erreurReferentiel}. Rien n’a été effacé : rechargez un fichier valide depuis l’écran Fichiers, ou videz ce
+        poste depuis les Réglages.
+      </Bandeau>
+    );
+  } else if (!structure || !referentiel) {
+    contenu = (
+      <EcranFichiers
+        structure={null}
+        referentiel={null}
+        validation={null}
+        jour={jour}
+        validationJour={null}
+        chargerStructure={chargerStructure}
+        chargerJour={setJour}
+        erreurStockage={erreurStockage}
+      />
+    );
+  } else if (destination === 'planning') {
+    contenu = jourAffiche ? (
+      <EcranPlanning
+        referentiel={referentiel}
+        jourAffiche={jourAffiche}
+        setJourAffiche={setJourAffiche}
+        axe={axe}
+        setAxe={setAxe}
+        source={sourcePlanning}
+        setSource={setSourcePlanning}
+        reparation={reparation}
+        options={options}
+      />
+    ) : (
+      <Vide>La grille de cette structure ne déclare aucun jour d’accueil.</Vide>
+    );
+  } else if (destination === 'journee') {
+    contenu = (
+      <EcranJournee
+        referentiel={referentiel}
+        jour={jour}
+        setJour={setJour}
+        reparation={reparation}
+        lancerReparation={lancerReparation}
+        validationJour={validationJour}
+        options={options}
+      />
+    );
+  } else if (destination === 'regles') {
+    contenu = (
+      <EcranRegles
+        referentiel={referentiel}
+        structure={structure}
+        setStructure={setStructure}
+        validation={validation}
+      />
+    );
+  } else if (destination === 'structure') {
+    contenu = <EcranStructure referentiel={referentiel} structure={structure} />;
+  } else if (destination === 'fichiers') {
+    contenu = (
+      <EcranFichiers
+        structure={structure}
+        referentiel={referentiel}
+        validation={validation}
+        jour={jour}
+        validationJour={validationJour}
+        chargerStructure={chargerStructure}
+        chargerJour={setJour}
+        erreurStockage={erreurStockage}
+      />
+    );
+  } else {
+    contenu = (
+      <EcranReglages
+        options={options}
+        setOptions={setOptions}
+        theme={theme}
+        setTheme={setTheme}
+        accent={accent}
+        setAccent={setAccent}
+      />
+    );
+  }
+
+  return (
+    <div
+      className="flex min-h-screen"
+      style={{ background: 'var(--paper)', color: 'var(--ink)', fontFamily: F_BODY }}
+    >
+      <NavigationLaterale
+        destination={destination}
+        setDestination={setDestination}
+        replie={replie}
+        setReplie={setReplie}
+        theme={theme}
+        basculerTheme={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+      />
+      <main className="chemin-impression min-w-0 flex-1">
+        {enTete}
+        <div className="chemin-impression p-6">{contenu}</div>
+      </main>
+    </div>
+  );
+}

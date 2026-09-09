@@ -5,7 +5,7 @@
  */
 
 import { Ajv2020, type ErrorObject, type ValidateFunction } from 'ajv/dist/2020.js';
-import { lireSchema } from '../chemins.ts';
+import { schemaJour, schemaStructure } from './schemas.ts';
 import { erreur, type Probleme } from './resultat.ts';
 
 let ajv: Ajv2020 | null = null;
@@ -15,8 +15,8 @@ let valideJour: ValidateFunction | null = null;
 function instance(): Ajv2020 {
   if (ajv) return ajv;
   ajv = new Ajv2020({ allErrors: true, strict: false, allowUnionTypes: true });
-  ajv.addSchema(lireSchema('structure') as object);
-  ajv.addSchema(lireSchema('jour') as object);
+  ajv.addSchema(schemaStructure);
+  ajv.addSchema(schemaJour);
   return ajv;
 }
 
