@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  Referentiel,
   auditeJourNominal,
   jourDeLaDate,
   optionsAvec,
   repare,
   type FichierJour,
 } from '../src/index.ts';
-import { jourExemple, referentielExemple } from './aide.ts';
+import { jourExemple, referentielExemple, structureMinimale } from './aide.ts';
 
 function jour(absences: FichierJour['absences'], extra: Partial<FichierJour> = {}): FichierJour {
   return {
@@ -176,5 +177,64 @@ describe('jourDeLaDate', () => {
     assert.equal(jourDeLaDate('2026-09-14'), 'lundi');
     assert.equal(jourDeLaDate('2026-09-18'), 'vendredi');
     assert.equal(jourDeLaDate('2026-09-20'), 'dimanche');
+  });
+});
+
+/* ==================== Binômes ====================
+   Quand un créneau nomme ses paires, remplacer un éducateur absent ne suffit
+   pas : il faut refaire la paire, sinon le jeune n'a plus de référent nommé et
+   les règles en `porte: "binome"` retombent sur le repli sans que personne ne
+   l'ait décidé. */
+
+describe('réparation d un créneau apparié', () => {
+  function structureAppariee() {
+    const s = structureMinimale();
+    s.planningType[0]!.affectations = [{ jeuneId: 'ja', educateurId: 'ea' }];
+    return s;
+  }
+
+  const absenceDeEa = {
+    structureVersion: 1,
+    date: '2026-09-14', // un lundi
+    absences: [{ type: 'educateur' as const, id: 'ea', journee: true }],
+  };
+
+  it('rattache le remplaçant au jeune resté sans référent', () => {
+    const ref = new Referentiel(structureAppariee());
+    const resultat = repare(ref, absenceDeEa);
+
+    assert.deepEqual(resultat.conflits, []);
+    const creneau = resultat.planning.creneau('c1')!;
+    assert.deepEqual(creneau.educateurs, ['eb'], 'eb remplace ea');
+    assert.deepEqual(
+      creneau.affectations,
+      [{ jeuneId: 'ja', educateurId: 'eb' }],
+      'la paire est refaite, pas seulement la liste',
+    );
+  });
+
+  it('le dit dans le motif du changement', () => {
+    const ref = new Referentiel(structureAppariee());
+    const resultat = repare(ref, absenceDeEa);
+    const ajout = resultat.changements.find((c) => c.educateurId === 'eb')!;
+    assert.match(ajout.motif, /reprend A\.A\./);
+  });
+
+  it('n invente pas de binôme sur un créneau collectif', () => {
+    const s = structureMinimale(); // aucune affectation déclarée
+    const ref = new Referentiel(s);
+    const resultat = repare(ref, absenceDeEa);
+    assert.deepEqual(resultat.planning.creneau('c1')!.affectations, []);
+    const ajout = resultat.changements.find((c) => c.educateurId === 'eb')!;
+    assert.doesNotMatch(ajout.motif, /reprend/);
+  });
+
+  it('ne laisse pas le planning de départ contaminé par l exploration du solveur', () => {
+    const ref = new Referentiel(structureAppariee());
+    const resultat = repare(ref, absenceDeEa);
+    // `initial` est le point de comparaison : ea y est déjà retiré (il est
+    // absent), mais aucune paire ne doit y avoir été ajoutée par le solveur.
+    assert.deepEqual(resultat.initial.creneau('c1')!.affectations, []);
+    assert.deepEqual(resultat.initial.creneau('c1')!.educateurs, []);
   });
 });

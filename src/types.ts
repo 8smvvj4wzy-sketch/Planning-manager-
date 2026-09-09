@@ -195,6 +195,18 @@ export type TypeRegle =
   | 'presence_minimale'
   | 'indisponibilite_recurrente';
 
+/**
+ * Sur quoi se juge une regle qui met en rapport un jeune et un educateur.
+ *
+ * - `presence` : la personne est sur le creneau, point.
+ * - `binome`   : elle est nommee aupres de ce jeune (voir `Affectation`).
+ *
+ * Le defaut depend du type de regle et n'est pas arbitraire : une autorisation
+ * gagne en justesse des qu'on sait qui accompagne, une interdiction ne se
+ * relache pas parce que la donnee s'affine. Voir docs/decisions.md.
+ */
+export type PorteRegle = 'presence' | 'binome';
+
 export interface Cibles {
   jeunes?: string[];
   educateurs?: string[];

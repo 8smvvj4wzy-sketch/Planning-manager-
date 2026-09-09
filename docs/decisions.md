@@ -155,3 +155,70 @@ Il faut le savoir avant de s'appuyer dessus :
   explicable — chaque changement porte son motif. Il n'est pas garanti optimal.
 - **Il ne répare qu'une journée à la fois.** Les quotas hebdomadaires se
   vérifient après coup, ils ne guident pas la recherche.
+
+---
+
+# Ce que le planning réel a corrigé
+
+Les décisions ci-dessus ont été prises sur la spécification seule. La lecture d'un
+planning d'établissement réel en a démenti une et en a rendu une autre indispensable.
+
+## 4. Le pas de 30 minutes ne tient pas
+
+Les bornes horaires réelles ne sont pas régulières : 9h30, 10h, 10h30, 11h, **11h15**,
+12h, **12h10**, 13h10, **13h30**, 14h30, 15h, 15h30. Le plus grand pas qui tombe juste
+sur toutes ces bornes est **5 minutes**.
+
+`pasMinutes` étant déjà un paramètre du fichier et le schéma acceptant 5, il n'y a rien
+à recoder. Mais la conséquence doit être écrite noir sur blanc, parce qu'elle est
+silencieuse : **toute règle exprimée en pas change d'échelle avec le pas.** Avec
+`pasMinutes: 5`, `tousLesPas: 2` veut dire dix minutes, `maxPasParJour: 4` vingt
+minutes, et une activité d'une heure fait `dureePas: 12`. Un fichier passé de 30 à 5
+minutes sans retoucher ses règles ne dit plus du tout la même chose.
+
+## 5. Le binôme jeune/éducateur
+
+Un créneau ne dit pas seulement qui est présent, il dit **qui est avec qui** : « Mand :
+Valentin / Simon, Habib / Agathe, Héléna / Sabrina » — une activité, trois paires
+nommées. Le modèle d'origine perdait cette information, et avec elle la moitié du sens
+de ses propres règles : `educateurs_autorises` ne pouvait vérifier que la co-présence
+dans la salle, et `rotation_educateur` ne savait pas de quel éducateur le jeune change.
+
+D'où `affectations: [{ jeuneId, educateurId }]` sur le créneau — facultatif et partiel.
+
+**Repli, valable partout :** sans binôme nommé pour un jeune, tous les éducateurs du
+créneau comptent comme étant auprès de lui. C'est ce qui laisse fonctionner à
+l'identique les plannings qui ne nomment pas leurs paires.
+
+**La nature nominative d'un créneau survit aux absences.** Le drapeau `nominatif` du
+planning résolu retient que le créneau *d'origine* nommait ses binômes. Sans lui, une
+absence qui vide les paires d'un créneau le ferait passer pour un collectif, et le
+solveur ne refermerait jamais la paire qu'il vient de rompre — le jeune se retrouverait
+avec un remplaçant, mais sans référent nommé, et les règles en portée binôme
+retomberaient sur le repli sans que personne ne l'ait décidé.
+
+## 6. La portée des règles : `porte`
+
+Une fois les binômes disponibles, chaque règle qui met en rapport un jeune et un
+éducateur doit dire ce qu'elle regarde. `params.porte` :
+
+- `presence` — la personne est sur le créneau, point ;
+- `binome` — elle est nommée auprès de ce jeune.
+
+Les défauts ne sont pas symétriques, et c'est délibéré :
+
+| règle | défaut | pourquoi |
+|---|---|---|
+| `educateurs_autorises` | `binome` | Une autorisation gagne en justesse dès qu'on sait qui accompagne. En `presence`, « L.M. uniquement avec Marie ou Karim » lui interdit toute activité collective à trois adultes. |
+| `educateurs_interdits` | `presence` | Une interdiction ne se relâche pas parce que la donnée s'affine : « pas de stagiaire avec N.K. » reste vrai si le stagiaire est dans la pièce sans en être le référent. |
+| `perimetre_renfort` | `presence` | Règle de sécurité, même raison. |
+| `rotation_educateur` | `binome` | La rotation porte sur l'accompagnant, pas sur qui passe dans la salle. |
+| `continuite_journee` (`sur: "educateurs"`) | `binome` | La rupture que vit le jeune, c'est le changement de référent. |
+
+Le principe derrière la table : **une permission se précise avec la donnée, une
+interdiction ne se relâche pas avec elle.** Changer un défaut change ce que le moteur
+autorise — ce n'est pas un réglage d'affichage.
+
+Une seule fonction porte cette sémantique, `educateursSelonPorte`
+(`src/affectations.ts`) ; les cinq règles s'en servent. Cinq définitions concurrentes de
+la portée finiraient par diverger.

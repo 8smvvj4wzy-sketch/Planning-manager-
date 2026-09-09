@@ -14,6 +14,12 @@
  * Le cout d'un changement est parametrable : voir OptionsMoteur / docs/decisions.md.
  */
 
+import {
+  jeunesSansReferent,
+  rattacheAuxJeunesSansReferent,
+  remplaceEducateurDansBinomes,
+  retireEducateurDesBinomes,
+} from '../affectations.ts';
 import { educateursRequis, jeunesPresentsDu } from '../encadrement.ts';
 import { estDetacheSur } from '../detachement.ts';
 import {
@@ -206,6 +212,42 @@ class Moteur {
     return conflits;
   }
 
+  /**
+   * Applique un candidat sur un planning : retrait des creneaux liberes, ajout
+   * sur la cible, et rattachement de l'educateur aux jeunes restes sans
+   * referent.
+   *
+   * Une seule definition, utilisee par l'essai d'admissibilite comme par
+   * l'application reelle. Deux chemins separes finiraient par diverger, et le
+   * solveur jugerait une affectation pour en appliquer une autre.
+   *
+   * Rend les jeunes que l'educateur reprend, pour que le motif du changement
+   * puisse le dire.
+   */
+  private applique(
+    planning: Planning,
+    creneauId: string,
+    educateurId: string,
+    liberer: readonly string[],
+  ): string[] {
+    for (const id of liberer) {
+      const source = planning.creneau(id);
+      if (!source) continue;
+      source.educateurs = source.educateurs.filter((e) => e !== educateurId);
+      // Le binome part avec lui : le laisser ferait croire que le jeune a
+      // encore un referent sur un creneau que l'educateur a quitte.
+      source.affectations = retireEducateurDesBinomes(source.affectations, educateurId);
+    }
+
+    const cible = planning.creneau(creneauId);
+    if (!cible) return [];
+    cible.educateurs.push(educateurId);
+    const repris = jeunesSansReferent(cible);
+    cible.affectations = rattacheAuxJeunesSansReferent(cible, educateurId);
+    planning.invalide();
+    return repris;
+  }
+
   private affecte(
     planning: Planning,
     creneau: Creneau,
@@ -213,7 +255,6 @@ class Moteur {
     changements: Changement[],
   ): void {
     for (const source of candidat.liberer) {
-      source.educateurs = source.educateurs.filter((id) => id !== candidat.educateurId);
       changements.push({
         action: 'retrait',
         creneauId: source.id,
@@ -222,15 +263,25 @@ class Moteur {
         motif: `libere pour ${creneau.id}`,
       });
     }
-    creneau.educateurs.push(candidat.educateurId);
-    planning.invalide();
+
+    const repris = this.applique(
+      planning,
+      creneau.id,
+      candidat.educateurId,
+      candidat.liberer.map((c) => c.id),
+    );
+
+    const motif = repris.length > 0
+      ? `${candidat.motif} — reprend ${repris.map((id) => this.ref.libelleJeune(id)).join(', ')}`
+      : candidat.motif;
+
     changements.push({
       action: candidat.liberer.length > 0 ? 'deplacement' : 'ajout',
       creneauId: creneau.id,
       educateurId: candidat.educateurId,
       ...(candidat.liberer[0] ? { depuisCreneauId: candidat.liberer[0].id } : {}),
       cout: candidat.cout,
-      motif: candidat.motif,
+      motif,
     });
   }
 
@@ -335,14 +386,13 @@ class Moteur {
     if (regles.length === 0) return true;
 
     const essai = planning.clone();
-    const cible = essai.creneau(creneau.id);
-    if (!cible) return false;
-    for (const source of candidat.liberer) {
-      const c = essai.creneau(source.id);
-      if (c) c.educateurs = c.educateurs.filter((id) => id !== candidat.educateurId);
-    }
-    cible.educateurs.push(candidat.educateurId);
-    essai.invalide();
+    if (!essai.creneau(creneau.id)) return false;
+    this.applique(
+      essai,
+      creneau.id,
+      candidat.educateurId,
+      candidat.liberer.map((c) => c.id),
+    );
 
     return !this.introduitViolationDure(planning, essai, regles);
   }
@@ -419,6 +469,9 @@ class Moteur {
           const cible = essai.creneau(creneauId);
           if (!cible) continue;
           cible.educateurs = cible.educateurs.map((id) => (id === sortant ? entrant.id : id));
+          // L'entrant reprend les binomes du sortant : sans ca la substitution
+          // laisse les jeunes du sortant sans referent nomme.
+          cible.affectations = remplaceEducateurDansBinomes(cible.affectations, sortant, entrant.id);
           essai.invalide();
 
           const essaiChangements = [
@@ -435,6 +488,7 @@ class Moteur {
           const reglesDures = this.reglesLiees(cible, entrant.id);
           if (cout < coutActuel && !this.introduitViolationDure(planning, essai, reglesDures)) {
             creneau.educateurs = cible.educateurs;
+            creneau.affectations = cible.affectations;
             planning.invalide();
             changements.push(essaiChangements[essaiChangements.length - 1]!);
             return cout;

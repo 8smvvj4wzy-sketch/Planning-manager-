@@ -2,16 +2,25 @@
  * `perimetre_renfort` — restreint le champ d'intervention d'un educateur
  * (typiquement un interimaire) a certains jeunes et/ou certaines activites.
  *
- * params : `jeunesAutorises[]`, `activitesAutorisees[]` (au moins l'un des deux).
+ * params :
+ *   - `jeunesAutorises[]`, `activitesAutorisees[]` (au moins l'un des deux) ;
+ *   - `porte` : "presence" (defaut) = tous les jeunes du creneau comptent ;
+ *               "binome" = seulement ceux qui lui sont nommement confies.
+ *
+ * Defaut `presence` : c'est une regle de securite, elle ne se relache pas parce
+ * que le planning nomme ses paires.
  */
 
 import type { Regle } from '../../types.ts';
 import type { Referentiel } from '../../referentiel.ts';
 import type { Probleme } from '../../validation/resultat.ts';
 import { avertissement } from '../../validation/resultat.ts';
+import { jeunesSelonPorte } from '../../affectations.ts';
 import {
   chemin,
   exigeCibles,
+  exigePorteValide,
+  litPorte,
   exigeReferences,
   faitViolation,
   litListe,
@@ -32,6 +41,7 @@ export const perimetreRenfort: EvaluateurRegle = {
       ...exigeReferences(regle, ref, regle.cibles.educateurs ?? [], 'educateurs', '/cibles/educateurs'),
       ...exigeReferences(regle, ref, jeunes, 'jeunes', '/params/jeunesAutorises'),
       ...exigeReferences(regle, ref, activites, 'activites', '/params/activitesAutorisees'),
+      ...exigePorteValide(regle, ref),
     ];
     if (jeunes.length === 0 && activites.length === 0) {
       problemes.push(
@@ -48,6 +58,7 @@ export const perimetreRenfort: EvaluateurRegle = {
   evalue(regle: Regle, ctx: ContexteEvaluation): Violation[] {
     const jeunesAutorises = litListe(regle, 'jeunesAutorises');
     const activitesAutorisees = litListe(regle, 'activitesAutorisees');
+    const porte = litPorte(regle, 'presence');
     const violations: Violation[] = [];
 
     for (const educateurId of regle.cibles.educateurs ?? []) {
@@ -63,7 +74,9 @@ export const perimetreRenfort: EvaluateurRegle = {
           );
         }
         if (jeunesAutorises.length > 0) {
-          const horsPerimetre = creneau.jeunes.filter((id) => !jeunesAutorises.includes(id));
+          const horsPerimetre = jeunesSelonPorte(creneau, educateurId, porte).filter(
+            (id) => !jeunesAutorises.includes(id),
+          );
           if (horsPerimetre.length > 0) {
             violations.push(
               faitViolation(

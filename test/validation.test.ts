@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { valideJour, valideStructure } from '../src/index.ts';
+import type { Structure } from '../src/index.ts';
 import { jourExemple, referentielExemple, structureExemple, structureMinimale } from './aide.ts';
 
 function codes(problemes: { code: string }[]): string[] {
@@ -160,5 +161,53 @@ describe('validation de jour.json', () => {
     jour.renfortsDuJour = ['e1'];
     const resultat = valideJour(referentielExemple(), jour);
     assert.ok(codes(resultat.problemes).includes('renfort.statut'));
+  });
+});
+
+describe('validation des binômes', () => {
+  function structureAppariee(): Structure {
+    const s = structureMinimale();
+    s.planningType[0]!.educateurs = ['ea', 'eb'];
+    s.planningType[0]!.affectations = [{ jeuneId: 'ja', educateurId: 'ea' }];
+    return s;
+  }
+
+  it('accepte un créneau dont les binômes portent sur des présents', () => {
+    const resultat = valideStructure(structureAppariee());
+    assert.equal(resultat.valide, true);
+    assert.ok(!codes(resultat.problemes).includes('creneau.affectation'));
+  });
+
+  it('refuse un binôme nommant un jeune absent des listes du créneau', () => {
+    const s = structureAppariee();
+    s.planningType[0]!.affectations = [{ jeuneId: 'jb', educateurId: 'ea' }];
+    const resultat = valideStructure(s);
+    assert.equal(resultat.valide, false);
+    assert.ok(codes(resultat.problemes).includes('creneau.affectation'));
+  });
+
+  it('refuse un binôme nommant un éducateur absent des listes du créneau', () => {
+    const s = structureAppariee();
+    s.planningType[0]!.affectations = [{ jeuneId: 'ja', educateurId: 'ec' }];
+    const resultat = valideStructure(s);
+    assert.equal(resultat.valide, false);
+    assert.ok(codes(resultat.problemes).includes('creneau.affectation'));
+  });
+
+  it('avertit sur un jeune laissé sans référent par un créneau qui nomme ses binômes', () => {
+    const s = structureAppariee();
+    s.planningType[0]!.jeunes = ['ja', 'jb'];
+    const resultat = valideStructure(s);
+    // Licite : c'est un avertissement, pas une erreur. Mais ça se signale,
+    // parce que le moteur bascule sur le repli pour ce jeune-là.
+    assert.equal(resultat.valide, true);
+    assert.ok(codes(resultat.problemes).includes('creneau.sans-referent'));
+  });
+
+  it('ne dit rien d un créneau collectif, qui ne nomme aucun binôme', () => {
+    const s = structureMinimale();
+    s.planningType[0]!.jeunes = ['ja', 'jb'];
+    const resultat = valideStructure(s);
+    assert.ok(!codes(resultat.problemes).includes('creneau.sans-referent'));
   });
 });

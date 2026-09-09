@@ -76,5 +76,17 @@ export {
 } from './moteur/reparation.ts';
 
 export { educateursRequis, jeunesPresentsDu, ratioApplicable } from './encadrement.ts';
+export {
+  declareDesBinomes,
+  educateursAupresDe,
+  educateursSelonPorte,
+  estNominatif,
+  jeunesSansReferent,
+  jeunesSelonPorte,
+  rattacheAuxJeunesSansReferent,
+  remplaceEducateurDansBinomes,
+  retireDesBinomes,
+  retireEducateurDesBinomes,
+} from './affectations.ts';
 export { estDetacheSur, groupesDeReference } from './detachement.ts';
 export { educateursLibres, jeunesSansAffectation, sallesLibres } from './vues.ts';

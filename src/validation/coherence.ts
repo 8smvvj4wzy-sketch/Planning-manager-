@@ -220,7 +220,68 @@ function verifiePlanningType(ref: Referentiel): Probleme[] {
     });
   });
 
-  return [...problemes, ...verifieChevauchements(ref)];
+  return [...problemes, ...verifieAffectations(ref), ...verifieChevauchements(ref)];
+}
+
+/**
+ * Les binomes doivent porter sur des gens qui sont effectivement sur le
+ * creneau : une paire qui nomme quelqu'un d'absent des listes ferait croire au
+ * moteur qu'un jeune a un referent qui n'est pas la.
+ */
+function verifieAffectations(ref: Referentiel): Probleme[] {
+  const problemes: Probleme[] = [];
+
+  ref.structure.planningType.forEach((creneau, i) => {
+    const affectations = creneau.affectations ?? [];
+    if (affectations.length === 0) return;
+    const base = `/planningType/${i}/affectations`;
+    const vues = new Set<string>();
+
+    affectations.forEach((a, k) => {
+      if (!creneau.jeunes.includes(a.jeuneId)) {
+        problemes.push(
+          erreur(
+            'creneau.affectation',
+            `${base}/${k}/jeuneId`,
+            `${ref.libelleJeune(a.jeuneId)} est nomme dans un binome mais absent des jeunes du creneau`,
+          ),
+        );
+      }
+      if (!creneau.educateurs.includes(a.educateurId)) {
+        problemes.push(
+          erreur(
+            'creneau.affectation',
+            `${base}/${k}/educateurId`,
+            `${ref.libelleEducateur(a.educateurId)} est nomme dans un binome mais absent des educateurs du creneau`,
+          ),
+        );
+      }
+      const cle = `${a.jeuneId}\u0000${a.educateurId}`;
+      if (vues.has(cle)) {
+        problemes.push(erreur('creneau.affectation', `${base}/${k}`, 'binome en double'));
+      }
+      vues.add(cle);
+    });
+
+    // Licite — un creneau peut ne nommer que certaines paires — mais ca se
+    // signale : c'est souvent un oubli de saisie, et le moteur bascule alors
+    // sur le repli pour ces jeunes-la sans que personne ne l'ait voulu.
+    const nommes = new Set(affectations.map((a) => a.jeuneId));
+    const orphelins = creneau.jeunes.filter((id) => !nommes.has(id));
+    if (orphelins.length > 0) {
+      problemes.push(
+        avertissement(
+          'creneau.sans-referent',
+          `/planningType/${i}`,
+          `ce creneau nomme ses binomes mais laisse sans referent : ${orphelins
+            .map((id) => ref.libelleJeune(id))
+            .join(', ')}`,
+        ),
+      );
+    }
+  });
+
+  return problemes;
 }
 
 /** Un jeune, un educateur ou une salle ne peuvent pas etre a deux endroits a la fois. */

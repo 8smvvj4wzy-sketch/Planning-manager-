@@ -7,7 +7,7 @@
  * derive d'une affectation manuelle...).
  */
 
-import type { Jour } from '../types.ts';
+import type { Affectation, Jour } from '../types.ts';
 
 export type OrigineCreneau = 'planning-type' | 'manuel' | 'moteur';
 
@@ -24,6 +24,22 @@ export interface Creneau {
   salleId: string | null;
   jeunes: string[];
   educateurs: string[];
+  /**
+   * Qui accompagne qui. Toujours present cote planning resolu (tableau vide
+   * plutot qu'absent : moins de `?? []` dans tout le moteur), facultatif dans
+   * le fichier. Voir src/affectations.ts pour la regle de repli.
+   */
+  affectations: Affectation[];
+  /**
+   * Le creneau d'origine nommait-il ses binomes ?
+   *
+   * Distinct de `affectations.length > 0` : une absence peut vider les paires
+   * d'un creneau nominatif, et sans ce drapeau il passerait pour un collectif
+   * — le solveur ne refermerait alors jamais la paire qu'il vient de rompre.
+   * La nature du creneau appartient au planning type, pas a ce qui survit a une
+   * absence.
+   */
+  nominatif: boolean;
   /** Intouchable meme en cas d'absence (structure.json). */
   verrouille: boolean;
   /** Intouchable pour aujourd'hui seulement (jour.json). */
@@ -68,7 +84,15 @@ export class Planning {
   clone(): Planning {
     return new Planning(
       this.jour,
-      this._creneaux.map((c) => ({ ...c, jeunes: [...c.jeunes], educateurs: [...c.educateurs] })),
+      // Les affectations se copient comme le reste : sans ca deux plannings
+      // partagent leurs binomes et le solveur corrompt l'original qu'il
+      // explore.
+      this._creneaux.map((c) => ({
+        ...c,
+        jeunes: [...c.jeunes],
+        educateurs: [...c.educateurs],
+        affectations: c.affectations.map((a) => ({ ...a })),
+      })),
     );
   }
 

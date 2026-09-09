@@ -13,8 +13,12 @@ qui définit tout ce que le moteur sait faire.
 
 ## Principes retenus
 
-1. **Pas de base : 30 minutes.** Une activité d'1h occupe 2 pas. Toutes les durées, quotas
-   et rotations s'expriment en nombre de pas.
+1. ~~**Pas de base : 30 minutes.**~~ **Démenti par le terrain.** Le planning réel a des
+   bornes à 11h15, 12h10 et 13h30 : le plus grand pas qui tombe juste sur toutes est
+   **5 minutes**. `pasMinutes` étant un paramètre du fichier, il n'y a rien à recoder —
+   mais toute durée, tout quota et toute rotation s'exprimant en pas **change d'échelle
+   avec lui** : `tousLesPas: 2` vaut dix minutes avec un pas de 5, pas une heure.
+   Voir `decisions.md`.
 2. **Deux fichiers séparés.** `structure.json` (stable, transmissible) et `jour.json`
    (absences + retouches du jour, jamais transmis).
 3. **Toute règle est un objet du même format.** Ajouter une règle = ajouter une entrée dans
@@ -225,6 +229,24 @@ départ que le moteur cherchera à **modifier le moins possible**.
 
 `verrouille: true` = créneau intouchable même en cas d'absence (rendez-vous extérieur,
 séance d'orthophonie, transport). Le moteur contournera au lieu de le déplacer.
+
+### `affectations` — qui est avec qui
+
+Ajouté après lecture d'un planning réel, qui ne dit pas « ces jeunes et ces éducateurs
+sont ensemble » mais « Habib avec Agathe, Héléna avec Sabrina ».
+
+```json
+"affectations": [
+  { "jeuneId": "j3", "educateurId": "e1" },
+  { "jeuneId": "j4", "educateurId": "e2" }
+]
+```
+
+Facultatif et **partiel** : une activité collective n'en a pas, un créneau peut n'en
+nommer que pour certains de ses jeunes, un jeune peut avoir plusieurs accompagnants.
+`jeunes[]` et `educateurs[]` restent la vérité sur qui est présent ; `affectations` dit
+qui accompagne qui. Sans binôme nommé pour un jeune, tous les éducateurs du créneau
+comptent comme étant auprès de lui.
 
 ---
 

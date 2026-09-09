@@ -3,6 +3,7 @@
  * des absences et des retouches manuelles du jour.
  */
 
+import { retireDesBinomes } from '../affectations.ts';
 import { jeunePresent, type EtatJour } from '../moteur/etatJour.ts';
 import type { Referentiel } from '../referentiel.ts';
 import type { CreneauType, Jour } from '../types.ts';
@@ -25,6 +26,8 @@ function versCreneau(
     salleId: modele.salleId ?? null,
     jeunes: [...modele.jeunes],
     educateurs: [...modele.educateurs],
+    affectations: (modele.affectations ?? []).map((a) => ({ ...a })),
+    nominatif: (modele.affectations ?? []).length > 0,
     verrouille: modele.verrouille,
     epingle,
   };
@@ -51,12 +54,21 @@ export function planningInitial(ref: Referentiel, etat: EtatJour): Planning {
   for (const creneau of planning.creneaux) {
     const pas = Array.from({ length: creneau.pas }, (_, i) => creneau.pasDebut + i);
     creneau.epingle = etat.epingles.has(creneau.id);
-    creneau.jeunes = creneau.jeunes.filter((id) => pas.some((p) => jeunePresent(ref, etat, id, p)));
+
+    const jeunesRetires = new Set(
+      creneau.jeunes.filter((id) => !pas.some((p) => jeunePresent(ref, etat, id, p))),
+    );
     // Un educateur absent, meme partiellement, est retire du creneau : il ne peut
     // pas en assurer la totalite. Le solveur cherchera un remplacant.
-    creneau.educateurs = creneau.educateurs.filter(
-      (id) => !pas.some((p) => etat.absencesEducateurs.get(id)?.has(p) ?? false),
+    const educateursRetires = new Set(
+      creneau.educateurs.filter((id) => pas.some((p) => etat.absencesEducateurs.get(id)?.has(p) ?? false)),
     );
+
+    creneau.jeunes = creneau.jeunes.filter((id) => !jeunesRetires.has(id));
+    creneau.educateurs = creneau.educateurs.filter((id) => !educateursRetires.has(id));
+    // Les binomes suivent : un binome dont l'un des deux est absent n'existe
+    // plus, et le laisser ferait croire au moteur que le jeune a un referent.
+    creneau.affectations = retireDesBinomes(creneau.affectations, jeunesRetires, educateursRetires);
   }
   planning.invalide();
   return planning;

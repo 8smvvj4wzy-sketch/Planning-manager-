@@ -12,7 +12,7 @@ import type { EtatJour } from '../moteur/etatJour.ts';
 import type { OptionsMoteur } from '../moteur/options.ts';
 import type { Probleme } from '../validation/resultat.ts';
 import { erreur } from '../validation/resultat.ts';
-import type { Regle } from '../types.ts';
+import type { PorteRegle, Regle } from '../types.ts';
 
 /** Cout attribue a la violation d'une regle dure : doit ecraser tout le reste. */
 export const COUT_REGLE_DURE = 1_000_000;
@@ -93,6 +93,29 @@ export function litNombre(regle: Regle, cle: string): number | undefined {
 export function litTexte(regle: Regle, cle: string): string | undefined {
   const v = regle.params?.[cle];
   return typeof v === 'string' ? v : undefined;
+}
+
+/**
+ * Sur quoi cette regle se juge. Le defaut est propre a chaque type : voir la
+ * table de docs/decisions.md. Changer un defaut change ce que le moteur
+ * autorise, ce n'est pas un detail de presentation.
+ */
+export function litPorte(regle: Regle, defaut: PorteRegle): PorteRegle {
+  const valeur = regle.params?.['porte'];
+  return valeur === 'presence' || valeur === 'binome' ? valeur : defaut;
+}
+
+/** Refuse une valeur de `porte` que personne ne saura interpreter. */
+export function exigePorteValide(regle: Regle, ref: Referentiel): Probleme[] {
+  const valeur = regle.params?.['porte'];
+  if (valeur === undefined || valeur === 'presence' || valeur === 'binome') return [];
+  return [
+    erreur(
+      'regle.porte',
+      chemin(regle, ref, '/params/porte'),
+      `portee inconnue : ${JSON.stringify(valeur)} (attendu "presence" ou "binome")`,
+    ),
+  ];
 }
 
 export function exigeCibles(

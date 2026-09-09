@@ -3,7 +3,12 @@
  *
  * params :
  *   - `maxChangements` : nombre de ruptures tolerees ;
- *   - `sur` : "educateurs" (defaut), "salle" ou "activite".
+ *   - `sur` : "educateurs" (defaut), "salle" ou "activite" ;
+ *   - `porte` : "binome" (defaut, sur la dimension "educateurs") = on compte les
+ *     changements d'accompagnant nomme ; "presence" = ceux de l'equipe entiere.
+ *
+ * Defaut `binome` : la rupture que vit le jeune, c'est le changement de
+ * referent, pas l'arrivee d'un adulte de plus dans la piece.
  *
  * Souple par defaut : chaque rupture au-dela du seuil coute un poids.
  */
@@ -12,11 +17,15 @@ import type { Regle } from '../../types.ts';
 import type { Referentiel } from '../../referentiel.ts';
 import type { Probleme } from '../../validation/resultat.ts';
 import { erreur } from '../../validation/resultat.ts';
+import { educateursSelonPorte } from '../../affectations.ts';
 import type { Creneau } from '../../planning/planning.ts';
+import type { PorteRegle } from '../../types.ts';
 import {
   chemin,
   exigeCibles,
   exigeNombre,
+  exigePorteValide,
+  litPorte,
   exigeReferences,
   faitViolation,
   litNombre,
@@ -28,10 +37,10 @@ import {
 
 type Dimension = 'educateurs' | 'salle' | 'activite';
 
-function empreinte(creneau: Creneau, sur: Dimension): string {
+function empreinte(creneau: Creneau, sur: Dimension, jeuneId: string, porte: PorteRegle): string {
   if (sur === 'salle') return creneau.salleId ?? '—';
   if (sur === 'activite') return creneau.activiteId;
-  return [...creneau.educateurs].sort().join('+');
+  return [...educateursSelonPorte(creneau, jeuneId, porte)].sort().join('+');
 }
 
 export const continuiteJournee: EvaluateurRegle = {
@@ -44,6 +53,7 @@ export const continuiteJournee: EvaluateurRegle = {
       ...exigeNombre(regle, ref, 'maxChangements'),
       ...exigeReferences(regle, ref, regle.cibles.jeunes ?? [], 'jeunes', '/cibles/jeunes'),
     ];
+    problemes.push(...exigePorteValide(regle, ref));
     const sur = litTexte(regle, 'sur');
     if (sur && !['educateurs', 'salle', 'activite'].includes(sur)) {
       problemes.push(erreur('regle.params', chemin(regle, ref, '/params/sur'), `dimension inconnue : "${sur}"`));
@@ -55,6 +65,7 @@ export const continuiteJournee: EvaluateurRegle = {
     const maximum = litNombre(regle, 'maxChangements');
     if (maximum === undefined) return [];
     const sur = (litTexte(regle, 'sur') ?? 'educateurs') as Dimension;
+    const porte = litPorte(regle, 'binome');
     const violations: Violation[] = [];
 
     for (const jeuneId of regle.cibles.jeunes ?? []) {
@@ -63,7 +74,13 @@ export const continuiteJournee: EvaluateurRegle = {
       for (let i = 1; i < journee.length; i++) {
         const precedent = journee[i - 1];
         const courant = journee[i];
-        if (precedent && courant && empreinte(precedent, sur) !== empreinte(courant, sur)) changements++;
+        if (
+          precedent &&
+          courant &&
+          empreinte(precedent, sur, jeuneId, porte) !== empreinte(courant, sur, jeuneId, porte)
+        ) {
+          changements++;
+        }
       }
       if (changements > maximum) {
         violations.push(
