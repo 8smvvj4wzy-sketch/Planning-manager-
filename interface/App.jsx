@@ -2656,10 +2656,13 @@ function CarteJeunes({ structure, setStructure }) {
       }}
       onAjouter={(nom, valeur) =>
         setStructure(
+          // `presence` omise : ajouteJeune la prend dans la grille (tous les
+          // jours d'accueil). La poser à `{}` rendait le jeune invisible au
+          // moteur — la grille l'affichait, mais aucun encadrement n'était
+          // demandé pour lui.
           ajouteJeune(structure, {
             initiales: nom,
             encadrement: Math.max(0.01, Number(valeur) || 1),
-            presence: {},
             actif: true,
           }),
         )
@@ -2692,10 +2695,11 @@ function CarteEducateurs({ structure, setStructure }) {
       }}
       onAjouter={(nom, valeur) =>
         setStructure(
+          // `disponibilites` omises : même raison que pour les jeunes — sans
+          // elles, l'éducateur n'était mobilisable nulle part.
           ajouteEducateur(structure, {
             nom,
             statut: valeur,
-            disponibilites: {},
             detachable: true,
             actif: true,
           }),

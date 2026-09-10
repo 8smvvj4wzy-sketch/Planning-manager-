@@ -757,3 +757,58 @@ et une clé qu'on oublierait d'y inscrire survivrait à un vidage sans que perso
 aperçoive. C'est le corollaire du piège de collision de `localStorage` — trois applications
 partagent la même adresse `github.io`, donc jamais de `clear()` global, donc une liste
 explicite qu'il faut tenir à jour.
+
+## 23. Les pauses sont des temps communs : rien à y affecter, rien à y exiger
+
+`docs/schema.md` annonçait que le moteur n'affecte rien pendant les pauses. Il ne le
+faisait pas : `estPause` n'était lu que par deux règles et une vue — jamais par le
+solveur, jamais par l'encadrement. Le moteur pouvait donc placer un éducateur en plein
+repas. L'utilisateur a tranché le sens : *« pas d'affectation, ce sont des temps communs
+qui font l'objet d'un planning spécifique »*.
+
+**Le correctif a deux moitiés, et elles sont indissociables.**
+
+1. `mobilisable` (`src/moteur/disponibilite.ts`) rend `false` sur un pas de pause. C'est la
+   porte unique par laquelle le solveur recrute : la fermer suffit à garantir « pas
+   d'affectation », il n'y a pas de second chemin à surveiller.
+2. `educateursRequis` (`src/encadrement.ts`) rend **0** pour un créneau dont *tous* les pas
+   sont des pauses.
+
+Sans la seconde, la première serait un recul : un créneau « Repas » réclamerait des
+éducateurs que plus personne ne peut fournir, et chaque repas deviendrait un conflit
+insoluble — l'écran passerait du silence à une ligne rouge par jour, sans qu'aucun geste
+ne puisse la faire disparaître. Strictement pire que de n'avoir rien fait.
+
+**Un créneau à cheval garde son besoin entier.** L'encadrement se calcule par créneau, pas
+par pas ; un besoin proratisé serait une règle que personne n'a demandée et que personne ne
+saurait relire. La bonne réponse à un créneau à moitié en pause est de le couper en deux —
+l'éditeur le permet.
+
+**Les éducateurs déjà inscrits sur un créneau de pause y restent.** C'est la donnée de
+l'utilisateur. Le moteur cesse d'en ajouter, il n'en retire pas — retirer serait défaire un
+choix explicite au nom d'une règle qui n'a jamais parlé de ça.
+
+Effet de bord assumé : `educateursLibres` rend une liste vide pendant les pauses. C'est
+exact — personne n'est mobilisable pendant le repas.
+
+## 24. Une personne créée à la main est présente par défaut
+
+`jeunePresent` rend `false` quand `presence[jour]` est absent, et `ajouteJeune` posait
+`presence: {}`. Un jeune créé dans l'application était donc **invisible pour le moteur** :
+aucun encadrement demandé pour lui, aucun éducateur mobilisable à ses côtés. Et rien ne le
+signalait — la grille l'affichait normalement, puisqu'elle lit `planningType` en direct.
+Trou ouvert avec « commencer sans tableur » : tant que tout le monde venait d'un import,
+la présence arrivait avec les créneaux.
+
+`ajouteJeune` et `ajouteEducateur` prennent maintenant leur défaut **dans la grille** :
+présent tous les jours d'accueil, de `grille.debut` à `grille.fin`. Un jeune qu'on inscrit
+dans son IME est là ; c'est l'absence qui se déclare, pas la présence.
+
+Le champ reste passable explicitement — `presence: {}` est respecté si on l'écrit. C'est
+l'omission qui déclenche le défaut, pas la valeur vide : les deux ne veulent pas dire la
+même chose. L'import, lui, continue de poser la présence jour par jour, d'après les
+créneaux où la personne apparaît réellement (`src/import/assemblage.ts`).
+
+Le test qui verrouille ça ne se contente pas de `valideStructure` : une structure peut être
+parfaitement valide et invisible au moteur, c'était précisément le cas. Il vérifie le bout
+de la chaîne — `educateursRequis > 0` et l'éducateur `mobilisable`.

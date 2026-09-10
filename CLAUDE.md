@@ -195,6 +195,24 @@ tests et n'est jamais importé depuis `interface/`.
   échouer l'alignement de grille pour toute heure non ronde. Les bornes de départ sont
   maintenant `23:59`/`00:00` : le premier élargissement réel les remplace forcément par
   les bornes exactes du fichier, sans compter sur la chance.
+- **Interdire une affectation sans annuler le besoin est un recul.** Les pauses : fermer
+  `mobilisable` (`src/moteur/disponibilite.ts`) empêche le moteur d'y placer quelqu'un,
+  mais tant que `educateursRequis` (`src/encadrement.ts`) réclame de l'encadrement sur ces
+  créneaux, chaque repas devient un manque que plus personne ne peut combler. Une ligne
+  rouge par jour, insoluble, là où il n'y avait rien. **Les deux moitiés vont ensemble** :
+  un créneau *entièrement* en pause rend 0. Un créneau à cheval garde son besoin entier —
+  l'encadrement se calcule par créneau, pas par pas ; la réponse est de le couper. Les
+  éducateurs déjà inscrits sur une pause y restent : le moteur cesse d'en ajouter, il n'en
+  retire pas. Voir `docs/decisions.md` §23.
+- **Une structure valide peut être invisible au moteur.** `jeunePresent` rend `false` quand
+  `presence[jour]` est absent : un jeune créé avec `presence: {}` ne demandait aucun
+  encadrement, et `valideStructure` n'y voyait rien à redire — la grille l'affichait
+  pourtant, puisqu'elle lit `planningType` en direct. `ajouteJeune` / `ajouteEducateur`
+  (`src/edition.ts`) prennent donc leur défaut **dans la grille** quand le champ est omis :
+  tous les jours d'accueil, de `debut` à `fin`. L'omission déclenche le défaut, pas la
+  valeur vide — `presence: {}` écrit explicitement reste respecté. Corollaire pour les
+  tests : `valideStructure` sans erreur ne prouve pas que le moteur voit les gens ; il faut
+  aller jusqu'à `educateursRequis` et `mobilisable`.
 
 ## Avant toute livraison
 

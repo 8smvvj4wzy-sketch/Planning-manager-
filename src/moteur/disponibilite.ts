@@ -44,6 +44,12 @@ export function calculDisponibilite(ref: Referentiel, etat: EtatJour): CalculDis
   const bloques = indisponibilitesRecurrentes(ref, etat.jour);
 
   const mobilisable = (educateurId: string, pas: number): boolean => {
+    // Une pause est un temps commun : le moteur n'y affecte personne. C'est la
+    // porte unique par laquelle le solveur recrute (`reparation.ts`), donc la
+    // fermer ici suffit — il n'y a pas de second chemin a garder en tete.
+    // Les educateurs deja inscrits sur un creneau de pause y RESTENT : c'est la
+    // donnee de l'utilisateur. Le moteur cesse d'en ajouter, il n'en retire pas.
+    if (ref.grille.estPause(pas)) return false;
     if (bloques.get(educateurId)?.has(pas)) return false;
     return educateurDisponible(ref, etat, educateurId, pas);
   };

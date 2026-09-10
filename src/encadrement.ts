@@ -2,6 +2,7 @@
  * Combien d'educateurs faut-il sur un creneau ?
  *
  * Ordre de decision :
+ *  0. un creneau entierement en pause ne reclame rien — c'est un temps commun ;
  *  1. une regle `binome_jeunes` active qui couvre exactement les jeunes presents ;
  *  2. `activite.educateursRequis` s'il est renseigne ;
  *  3. selon `options.encadrement` :
@@ -15,6 +16,19 @@ import type { Referentiel } from './referentiel.ts';
 import { jeunePresent, type EtatJour } from './moteur/etatJour.ts';
 import type { OptionsMoteur } from './moteur/options.ts';
 import { pasDuCreneau } from './planning/planning.ts';
+
+/**
+ * Le creneau tient-il ENTIEREMENT dans des pauses ?
+ *
+ * Un creneau a cheval (moitie pause, moitie non) garde son besoin entier :
+ * l'encadrement se calcule par creneau, pas par pas, et inventer un besoin
+ * partiel serait une regle que personne n'a demandee. La bonne reponse a un
+ * creneau a cheval est de le couper — l'editeur le permet.
+ */
+function entierementEnPause(ref: Referentiel, creneau: Creneau): boolean {
+  const pas = pasDuCreneau(creneau);
+  return pas.length > 0 && pas.every((p) => ref.grille.estPause(p));
+}
 
 /** Jeunes du creneau reellement presents (accueillis ce jour, non absents). */
 export function jeunesPresentsDu(ref: Referentiel, etat: EtatJour, creneau: Creneau): string[] {
@@ -67,6 +81,12 @@ export function educateursRequis(
   options: OptionsMoteur,
   jeunesPresents = jeunesPresentsDu(ref, etat, creneau),
 ): number {
+  // Un temps de pause ne reclame aucun encadrement : personne n'y est
+  // mobilisable (`calculDisponibilite`), donc en exiger un ferait de chaque
+  // repas un manque impossible a combler — strictement pire que de n'avoir
+  // rien fait. Les deux moities du correctif vont ensemble.
+  if (entierementEnPause(ref, creneau)) return 0;
+
   if (jeunesPresents.length === 0) return 0;
 
   const binome = surchargeBinome(ref, jeunesPresents);

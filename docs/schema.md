@@ -82,8 +82,16 @@ Le cadre temporel commun à tout le planning.
 }
 ```
 
-Les pauses sont des créneaux où le moteur n'affecte rien automatiquement (mais où l'on peut
-affecter à la main : surveillance du repas, etc.).
+Les pauses sont des temps communs : le moteur n'y affecte personne et n'y réclame aucun
+encadrement. Concrètement, `mobilisable` rend `false` sur un pas de pause, et
+`educateursRequis` rend `0` pour un créneau dont *tous* les pas sont des pauses.
+
+On peut y affecter **à la main** (surveillance du repas) : ce qui est écrit dans le fichier
+est respecté, le moteur ne retire rien.
+
+Un créneau **à cheval** — moitié pause, moitié non — garde son besoin d'encadrement entier.
+L'encadrement se calcule par créneau, pas par pas. Si ce n'est pas ce qu'on veut, il faut
+couper le créneau en deux.
 
 ---
 
