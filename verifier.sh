@@ -13,6 +13,7 @@
 #   3. la suite de tests du moteur
 #   4. le build de l'interface
 #   5. aucun prénom réel dans le dépôt (il est PUBLIC — voir CLAUDE.md)
+#   6. aucun octet de contrôle dans un fichier source
 
 set -u
 cd "$(dirname "$0")" || exit 1
@@ -77,6 +78,22 @@ if [ -z "$FUITE" ]; then
   echo "  ✓ l'interface n'importe aucun jeu de données"
 else
   echo "$FUITE" | sed 's/^/  ✗ /'
+  ECHECS=$((ECHECS + 1))
+fi
+
+# --- 6 -----------------------------------------------------------------------
+# Un octet NUL dans un source passe le typecheck, les tests ET le build : c'est
+# un caractère de chaîne valide. Mais il rend le fichier « binaire » pour git,
+# grep et les diffs — l'outillage cesse de voir le code sans rien dire. Arrivé
+# une fois, par un collage malheureux dans un séparateur de chaîne.
+echo "▸ 6. Aucun octet de contrôle dans les sources"
+BINAIRES=$(git ls-files -- 'src/**' 'interface/**' 'test/**' 'scripts/**' '*.json' '*.md' '*.sh' \
+  | grep -v '\.woff2$' \
+  | xargs -r grep -lP '[\x00-\x08\x0E-\x1F]' 2>/dev/null || true)
+if [ -z "$BINAIRES" ]; then
+  echo "  ✓ sources propres"
+else
+  echo "$BINAIRES" | sed 's/^/  ✗ octet de contrôle dans /'
   ECHECS=$((ECHECS + 1))
 fi
 

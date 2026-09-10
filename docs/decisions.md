@@ -582,3 +582,51 @@ libres » répétait 78 fois la même ligne. `plagesDePas` replie des pas contig
 troisième fois dans ce projet que le pas-à-pas du moteur remonte tel quel à l'écran (voir
 §14 pour les chevauchements) : **le moteur a raison de raisonner pas par pas, l'écran a
 tort de le recopier.**
+
+## 17. Éditer sans tableur
+
+L'éditeur de créneaux (§15) n'existait qu'après un import. Sans fichier, l'application
+était un mur : pas de structure, donc pas de grille, donc rien à éditer. C'est une
+demande directe de l'utilisateur — « on améliore l'éditeur en le rendant disponible même
+sans CSV » — et elle touchait un manque réel, pas un confort.
+
+**Trois entrées au lieu d'une** : déposer un `structure.json`, coller un planning de
+tableur, ou partir d'une grille vide. La troisième ne demande que ce dont la grille a
+besoin pour exister — jours d'accueil, horaires, pas — et le reste se saisit ensuite.
+
+`structureVierge` (`src/edition.ts`) porte cette construction. Le `structureVide` de
+`src/import/assemblage.ts` s'y ramène désormais : même forme, bornes en paramètre. Les
+siennes restent volontairement extrêmes (23:59–00:00), pour que le premier élargissement
+les ramène aux bornes exactes du fichier (§11). Un seul constructeur, deux usages — une
+structure vide n'a pas à exister en deux versions qui divergeront.
+
+**Les listes deviennent éditables.** Jeunes, éducateurs, activités et salles se saisissent
+dans l'écran Structure, par une seule carte générique : les quatre se ressemblent au point
+que les écrire séparément ferait quatre fois le même bug à corriger. Chacune n'a que deux
+champs qui comptent — un nom, une valeur propre au type — et les mêmes gestes.
+
+Les invariants restent dans `src/edition.ts`, jamais dans l'écran :
+
+- supprimer un jeune ou un éducateur le retire des créneaux, de leurs `affectations`, des
+  `refEducateurs` d'un groupe **et** des `cibles` des règles. Quatre endroits ; en oublier
+  un rend la structure invalide juste après un geste sans ambiguïté ;
+- supprimer une activité encore utilisée est **refusé**, avec le nombre de créneaux
+  concernés. Une activité n'est pas une personne : la retirer d'un créneau ne veut rien
+  dire, un créneau sans activité n'existe pas. Les seules issues seraient de supprimer les
+  créneaux dans la foulée — détruire du travail sans le dire — ou de refuser.
+
+**Ajouter un créneau** se fait depuis la grille : il se pose à la suite du dernier de la
+journée, avec la durée déclarée de son activité, et l'éditeur s'ouvre dessus. Pas de
+formulaire de création à part : ce serait deux endroits où régler les mêmes champs.
+
+## 18. Un octet de contrôle passe tous les contrôles
+
+Trouvé en travaillant sur ce lot : un octet NUL s'était glissé dans `interface/App.jsx`,
+au milieu d'un séparateur de chaîne. Le typecheck, les 255 tests et le build restaient
+verts — c'est un caractère de chaîne parfaitement valide. Mais `file` répondait
+« data », `grep` refusait de chercher dedans, et git le traitait comme un binaire : tout
+l'outillage cessait de voir le code, sans rien dire.
+
+D'où un sixième contrôle dans `verifier.sh`, vérifié en le mettant volontairement en
+échec avant de le garder. Un séparateur NUL délibéré s'écrit en échappement — c'est ce
+que fait `src/affectations.ts` — jamais en octet brut.
