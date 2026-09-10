@@ -25,7 +25,8 @@
     "dev": "vite",
     "build:interface": "vite build",
     "preview": "vite preview",
-    "verifier": "./verifier.sh"
+    "verifier": "./verifier.sh",
+    "test:interface": "playwright test"
   },
   "dependencies": {
     "ajv": "^8.17.1",
@@ -34,6 +35,7 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/node": "^22.10.0",
     "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.5.5",

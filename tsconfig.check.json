@@ -8,5 +8,16 @@
     "src/**/*.ts",
     "test/**/*.ts",
     "scripts/**/*.ts"
+  ],
+  // Les tests d'interface ont leur propre tsconfig, et ce n'est pas un detail
+  // d'organisation. Ils pilotent un navigateur, donc ils ont besoin de la lib
+  // "DOM" — que tsconfig.json n'a PAS, deliberement : l'ajouter ouvrirait tout
+  // le moteur aux globals du navigateur, ce que CLAUDE.md interdit et ce qui
+  // justifie l'import en type seul de src/transport/chiffrement.ts. Les inclure
+  // ici casserait donc le controle 1, et la reparation la plus courte serait
+  // exactement celle que le depot refuse.
+  // Ils sont typecheckes a part : voir le controle 1 de verifier.sh.
+  "exclude": [
+    "test/interface/**"
   ]
 }
