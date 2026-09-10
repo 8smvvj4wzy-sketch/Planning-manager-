@@ -55,6 +55,19 @@ export interface OptionsAssemblage {
    * facon (non resolu = non importe), et signale.
    */
   resolutionsJours?: Readonly<Record<string, Jour | null>>;
+  /**
+   * Que faire des creneaux deja presents sur les jours importes.
+   *
+   * - `'remplace'` (defaut) : le fichier fait autorite sur ces jours-la. C'est
+   *   ce qu'on veut en reimportant une version corrigee du meme planning —
+   *   sans ca, les deux se cumuleraient en doublons.
+   * - `'ajoute'` : les creneaux existants restent, ceux du fichier s'y
+   *   ajoutent. C'est le cas de DEUX CLASSES qui partagent les memes journees
+   *   et le meme batiment : chacune a son export, et le planning complet est
+   *   leur somme. Les conflits de salle entre elles sortent alors tout seuls a
+   *   la validation — c'est precisement ce qu'on cherche a voir.
+   */
+  surJoursImportes?: 'remplace' | 'ajoute';
   /** Utilise seulement quand `base` est absent : il faut bien un auteur. */
   metaDepart?: MetaDepart;
 }
@@ -282,10 +295,14 @@ export function assemble(planningLu: PlanningLu, options: OptionsAssemblage): Re
     return id;
   }
 
-  // --- 4. creneaux : ceux des jours importes remplacent les creneaux -------
-  //        existants de CES jours-la, jamais fusionnes en douce ; les autres
-  //        jours de la structure de depart ne bougent pas.
-  const creneauxAutresJours = depart.planningType.filter((c) => !joursPresents.has(c.jour));
+  // --- 4. creneaux : selon `surJoursImportes`, ceux des jours importes -----
+  //        remplacent les creneaux existants de CES jours-la (defaut, jamais
+  //        de fusion en douce) ou s'y ajoutent (deuxieme classe). Les autres
+  //        jours de la structure de depart ne bougent dans aucun cas.
+  const creneauxGardes =
+    options.surJoursImportes === 'ajoute'
+      ? depart.planningType
+      : depart.planningType.filter((c) => !joursPresents.has(c.jour));
   const idsCreneauxConnus = new Set(depart.planningType.map((c) => c.id));
   const nouveauxCreneaux: CreneauType[] = [];
 
@@ -385,7 +402,7 @@ export function assemble(planningLu: PlanningLu, options: OptionsAssemblage): Re
       jeunes: [...jeunes.values()],
       educateurs: [...educateurs.values()],
       activites: [...activites.values()],
-      planningType: [...creneauxAutresJours, ...nouveauxCreneaux],
+      planningType: [...creneauxGardes, ...nouveauxCreneaux],
       regles: depart.regles,
     },
     problemes,

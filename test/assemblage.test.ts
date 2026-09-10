@@ -2,12 +2,14 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   Referentiel,
+  ajouteSalle,
   assemble,
   litPlanning,
   nomsRencontres,
   proposeCorrespondances,
   valideStructure,
   type Correspondance,
+  type Structure,
 } from '../src/index.ts';
 import { structureMinimale } from './aide.ts';
 
@@ -289,6 +291,71 @@ describe('assemblage de plusieurs jours en une passe', () => {
     // mais le mécanisme est le même que pour un seul jour).
     assert.ok(structure.planningType.some((cr) => cr.jour === 'mardi'));
     assert.deepEqual(structure.grille.jours.sort(), ['lundi', 'mardi']);
+  });
+});
+
+describe('fusionner deux classes qui partagent les mêmes journées', () => {
+  /* Deux exports séparés, un par classe, sur le même vendredi. Le second doit
+     pouvoir s'ajouter au premier au lieu de l'écraser. */
+  const CLASSE_2 = [
+    ['', 'Vendredi', '', ''],
+    ['9h30', 'Atelier :\nLumen / Nott', '', ''],
+    ['10h', '', '', ''],
+    ['10h30', 'Piscine :\nLumen / Nott', '', ''],
+    ['11h', '', '', ''],
+  ].map((l) => [...l]);
+
+  function importe(base: Structure, mode: 'remplace' | 'ajoute'): Structure {
+    const lu = litPlanning(CLASSE_2);
+    return assemble(lu, {
+      base,
+      correspondances: proposeCorrespondances(new Referentiel(base), nomsRencontres(lu)),
+      surJoursImportes: mode,
+    }).structure;
+  }
+
+  const classe1 = assemble(litPlanning(VENDREDI), {
+    correspondances: proposeCorrespondances(null, nomsRencontres(litPlanning(VENDREDI))),
+    metaDepart: { auteur: 'Test', etablissement: 'IME Test' },
+  }).structure;
+
+  it('remplace le jour par défaut — réimporter le même planning ne le duplique pas', () => {
+    const fusion = importe(classe1, 'remplace');
+    const noms = fusion.planningType.map((c) => fusion.activites.find((a) => a.id === c.activiteId)?.nom);
+    assert.ok(!noms.includes('Accueil'), 'la première classe a été remplacée');
+    assert.ok(noms.includes('Atelier'));
+  });
+
+  it('ajoute les créneaux de la seconde classe sans effacer la première', () => {
+    const fusion = importe(classe1, 'ajoute');
+    const noms = fusion.planningType.map((c) => fusion.activites.find((a) => a.id === c.activiteId)?.nom);
+
+    assert.ok(noms.includes('Accueil'), 'la première classe survit');
+    assert.ok(noms.includes('Atelier'), 'la seconde s’ajoute');
+    assert.equal(
+      fusion.planningType.length,
+      classe1.planningType.length + 2,
+      'les deux créneaux de la seconde classe, et rien de perdu',
+    );
+    assert.equal(new Set(fusion.planningType.map((c) => c.id)).size, fusion.planningType.length);
+  });
+
+  it('fait ressortir un conflit de salle entre les deux classes', () => {
+    // C'est tout l'intérêt de la fusion : deux classes dans le même bâtiment
+    // se disputent les salles, et personne ne le voit tant qu'elles sont dans
+    // deux fichiers séparés.
+    let fusion = importe(classe1, 'ajoute');
+    fusion = ajouteSalle(fusion, { nom: 'Grande salle', capacite: 10 });
+    const salleId = fusion.salles[0]!.id;
+
+    const aNeufHeures = fusion.planningType.filter((c) => c.debut === '09:30');
+    assert.ok(aNeufHeures.length >= 2, 'les deux classes se croisent bien à 9h30');
+    fusion = { ...fusion, planningType: fusion.planningType.map((c) => (c.debut === '09:30' ? { ...c, salleId } : c)) };
+
+    const chevauchements = valideStructure(fusion).problemes.filter(
+      (p) => p.code === 'creneau.chevauchement' && p.message.includes('salle'),
+    );
+    assert.ok(chevauchements.length > 0, 'la même salle pour deux classes au même moment');
   });
 });
 
