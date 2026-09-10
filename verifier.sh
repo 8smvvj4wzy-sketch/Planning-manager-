@@ -85,11 +85,17 @@ fi
 # Un octet NUL dans un source passe le typecheck, les tests ET le build : c'est
 # un caractère de chaîne valide. Mais il rend le fichier « binaire » pour git,
 # grep et les diffs — l'outillage cesse de voir le code sans rien dire. Arrivé
-# une fois, par un collage malheureux dans un séparateur de chaîne.
+# deux fois, par un collage malheureux dans un séparateur de chaîne.
+#
+# `-a` n'est PAS décoratif : sans lui, `grep -l` refuse de lister un fichier
+# qu'il juge binaire, et c'est précisément un NUL qui déclenche ce jugement. Ce
+# contrôle a donc été aveugle au seul cas pour lequel il existait, jusqu'à ce
+# qu'un NUL passe sous son nez. Le vérifier avec un `\x01` ne prouve rien : il
+# faut un vrai NUL.
 echo "▸ 6. Aucun octet de contrôle dans les sources"
 BINAIRES=$(git ls-files -- 'src/**' 'interface/**' 'test/**' 'scripts/**' '*.json' '*.md' '*.sh' \
   | grep -v '\.woff2$' \
-  | xargs -r grep -lP '[\x00-\x08\x0E-\x1F]' 2>/dev/null || true)
+  | xargs -r grep -alP '[\x00-\x08\x0E-\x1F]' 2>/dev/null || true)
 if [ -z "$BINAIRES" ]; then
   echo "  ✓ sources propres"
 else

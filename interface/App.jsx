@@ -123,6 +123,11 @@ const CLE_SCENARIOS = `${PREFIXE}scenarios`;
 const CLE_OPTIONS = `${PREFIXE}options`;
 const CLE_THEME = `${PREFIXE}theme`;
 const CLE_ACCENT = `${PREFIXE}accent`;
+/* Les fichiers déposés ou collés, pour pouvoir les reprendre sans les
+   redemander. Ils portent de VRAIS prénoms : ils restent dans le navigateur de
+   ce poste, n'entrent dans aucun export, et « Vider ce poste » les efface avec
+   le reste — la liste ci-dessous est la seule énumération des clés. */
+const CLE_IMPORTS = `${PREFIXE}imports`;
 
 const ACCENTS = [
   { id: null, nom: 'Neutre', swatch: 'var(--swatch-neutre)' },
@@ -2990,6 +2995,75 @@ function LigneJourDetecte({ groupe, resolution, onChange }) {
   );
 }
 
+/* Mémoire des fichiers importés.
+
+   Un planning se reprend en plusieurs fois : on importe, on corrige, on
+   s'interrompt, et le lendemain le fichier n'est plus sous la main. Les garder
+   évite de le redemander.
+
+   Ils portent de VRAIS prénoms. Ils restent donc dans le stockage local de ce
+   poste, n'entrent dans aucun export, et « Vider ce poste » les efface avec le
+   reste (voir CLE_IMPORTS). */
+const IMPORTS_GARDES = 10;
+const TAILLE_MAX_IMPORT = 200_000; // le fichier réel en fait 8 000
+
+function litImports() {
+  const liste = lireStockage(CLE_IMPORTS);
+  return Array.isArray(liste) ? liste : [];
+}
+
+/**
+ * Ajoute un fichier en tête, sans doublon de nom, et rend la liste tronquée.
+ *
+ * Un fichier trop gros n'est pas gardé : le quota du navigateur se remplit en
+ * silence, et perdre la structure chargée pour avoir voulu garder une copie du
+ * tableur serait un mauvais échange. `ecrireStockage` relit derrière lui, donc
+ * un dépassement se voit — mais autant ne pas le provoquer.
+ */
+function avecImport(liste, nom, texte) {
+  if (texte.length > TAILLE_MAX_IMPORT) return liste;
+  const entree = { id: `${Date.now()}`, nom, date: new Date().toISOString(), taille: texte.length, texte };
+  return [entree, ...liste.filter((i) => i.nom !== nom)].slice(0, IMPORTS_GARDES);
+}
+
+function CarteImportsRecents({ imports, onReprendre, onOublier }) {
+  if (imports.length === 0) return null;
+
+  return (
+    <Carte
+      titre={`Fichiers importés récemment (${imports.length})`}
+      sousTitre="Gardés sur ce poste seulement, pour les reprendre sans les redemander"
+    >
+      <div className="space-y-1.5">
+        {imports.map((fichier) => (
+          <div
+            key={fichier.id}
+            className="flex items-center gap-3 rounded-lg border px-3 py-2 text-sm"
+            style={{ borderColor: 'var(--border)' }}
+          >
+            <span className="min-w-0 flex-1 truncate" style={{ color: 'var(--ink)', fontWeight: 600 }}>
+              {fichier.nom}
+            </span>
+            <span className="shrink-0 text-xs" style={{ color: 'var(--ink-soft)', fontFamily: F_MONO }}>
+              {classeDate(fichier.date.slice(0, 10))} · {Math.max(1, Math.round(fichier.taille / 1024))} ko
+            </span>
+            <Bouton onClick={() => onReprendre(fichier)}>Reprendre</Bouton>
+            <button
+              type="button"
+              onClick={() => onOublier(fichier)}
+              aria-label={`Oublier ${fichier.nom}`}
+              className="rounded-lg border p-1"
+              style={{ borderColor: 'var(--border)', color: 'var(--crisis)' }}
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </Carte>
+  );
+}
+
 function ImportTableur({ referentiel, structure, onCharge }) {
   const [texte, setTexte] = useState('');
   const [lu, setLu] = useState(null);
@@ -3001,6 +3075,23 @@ function ImportTableur({ referentiel, structure, onCharge }) {
   const [metaEtablissement, setMetaEtablissement] = useState('');
   const [resultatAssemblage, setResultatAssemblage] = useState(null);
   const [messageFinal, setMessageFinal] = useState(null);
+  const [imports, setImportsEtat] = useState(litImports);
+
+  /* Seul un fichier DÉPOSÉ est mémorisé : `analyseTexte` est aussi appelée à
+     chaque frappe dans la zone de collage, et enregistrer là produirait une
+     entrée par caractère. */
+  const memorise = (nom, contenu) => {
+    const suivants = avecImport(imports, nom, contenu);
+    if (suivants === imports) return; // trop gros : voir TAILLE_MAX_IMPORT
+    setImportsEtat(suivants);
+    if (!ecrireStockage(CLE_IMPORTS, suivants)) setImportsEtat(imports);
+  };
+
+  const oublie = (fichier) => {
+    const suivants = imports.filter((i) => i.id !== fichier.id);
+    setImportsEtat(suivants);
+    ecrireStockage(CLE_IMPORTS, suivants);
+  };
 
   const analyseTexte = (contenu) => {
     setTexte(contenu);
@@ -3099,10 +3190,19 @@ function ImportTableur({ referentiel, structure, onCharge }) {
               aide="Exporté depuis le tableur. Les accents sont reconnus même si le fichier n’est pas en UTF-8."
               accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain"
               binaire
-              onFichier={(contenu) => analyseTexte(contenu)}
+              onFichier={(contenu, nom) => {
+                analyseTexte(contenu);
+                if (nom) memorise(nom, contenu);
+              }}
             />
           </div>
         </div>
+
+        <CarteImportsRecents
+          imports={imports}
+          onReprendre={(fichier) => analyseTexte(fichier.texte)}
+          onOublier={oublie}
+        />
 
         {erreurLecture && (
           <Bandeau ton="alerte" icone={AlertTriangle} titre="Lecture impossible">
@@ -3840,8 +3940,9 @@ function EcranReglages({ options, setOptions, theme, setTheme, accent, setAccent
 
       <Carte titre="Stockage" sousTitre="Ce que ce poste garde entre deux ouvertures">
         <p className="text-sm" style={{ color: 'var(--ink)' }}>
-          La structure chargée, la situation en cours, les plannings enregistrés et ces réglages, dans le
-          stockage local du navigateur, sous le préfixe <code style={{ fontFamily: F_MONO }}>planning-ime:</code>.
+          La structure chargée, la situation en cours, les plannings enregistrés, les derniers fichiers
+          importés et ces réglages, dans le stockage local du navigateur, sous le préfixe{' '}
+          <code style={{ fontFamily: F_MONO }}>planning-ime:</code>. Rien ne quitte ce poste.
         </p>
         <p className="mt-2 text-sm" style={{ color: 'var(--ink-soft)' }}>
           Ce préfixe n’est pas cosmétique : cette application, DatABA et DatABA Manager partagent la même adresse,
@@ -3854,13 +3955,13 @@ function EcranReglages({ options, setOptions, theme, setTheme, accent, setAccent
             onClick={() => {
               if (
                 !window.confirm(
-                  'Effacer la structure, la situation en cours, les plannings enregistrés et les réglages ' +
-                    'de ce poste ?',
+                  'Effacer la structure, la situation en cours, les plannings enregistrés, les fichiers ' +
+                    'importés récemment et les réglages de ce poste ?',
                 )
               ) {
                 return;
               }
-              [CLE_STRUCTURE, CLE_PERIODE, CLE_SCENARIOS, CLE_OPTIONS].forEach(effacerStockage);
+              [CLE_STRUCTURE, CLE_PERIODE, CLE_SCENARIOS, CLE_OPTIONS, CLE_IMPORTS].forEach(effacerStockage);
               window.location.reload();
             }}
           >
