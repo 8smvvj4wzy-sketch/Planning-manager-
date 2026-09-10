@@ -682,3 +682,33 @@ replis, dans cet ordre :
 disparaissent. Il reste **une** erreur — une éducatrice sur deux activités le jeudi à
 14h30, une vraie double affectation à arbitrer. Le trajet complet depuis le premier
 import : 570 → 154 → 66 → 6 → **1**.
+
+## 20. Proposer des issues, ne pas corriger tout seul
+
+« L'app peut-elle proposer des correctifs ? » — oui, et c'est une question de forme autant
+que de fond. Un chevauchement se résout de plusieurs façons qui ne se valent pas :
+raccourcir le créneau qui déborde, retirer la personne de l'un ou de l'autre, supprimer
+l'un des deux. Aucune n'est « la » bonne dans l'absolu.
+
+`correctifsPour` (`src/correctifs.ts`) les **énumère**, du moins destructeur au plus, en
+disant ce que chacune emporte — « 1 jeune(s) et 1 educateur(s) y sont nommes » avant une
+suppression. Il ne tranche pas : le moteur ne sait pas laquelle des deux activités compte
+pour l'établissement. D'où « proposer », jamais « corriger automatiquement » — un bouton
+qui promet de réparer seul finirait par détruire du travail en silence.
+
+**Rien n'y manipule une structure en propre** : tout passe par `src/edition.ts`, qui
+maintient déjà les invariants. Un correctif n'est qu'un libellé, une explication, et un
+appel.
+
+**Retrouver le constat depuis le problème.** Un `Probleme` porte un message fait pour être
+lu ; y chercher de quels créneaux vient une collision serait fragile. `Probleme.cle`
+(`table|personne|creneau|autre`, posée par `verifieChevauchements`) identifie le constat
+sous-jacent et tient d'un rendu à l'autre. Les identifiants ne peuvent pas contenir de
+`|` — le schéma les restreint à `[A-Za-z0-9_-]` — donc le découpage est sûr.
+
+**Ce que le test vérifie.** Pas les libellés : qu'après application, la collision visée a
+**disparu** de `valideStructure`, et qu'aucune autre erreur n'est apparue. Un correctif
+peut être bien formulé et ne rien régler.
+
+Un correctif dont l'un des deux créneaux a déjà disparu — parce qu'on vient d'en appliquer
+un autre — rend une liste vide plutôt que de lever : c'est un état normal, pas une erreur.
