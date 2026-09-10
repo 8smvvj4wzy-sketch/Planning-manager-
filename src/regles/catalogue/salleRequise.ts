@@ -22,6 +22,19 @@ import {
 export const salleRequise: EvaluateurRegle = {
   type: 'salle_requise',
   dureParDefaut: true,
+  libelle: 'Salle requise',
+  resume: 'Cette activité ou ce jeune exige l’une de ces salles.',
+  cibles: { cles: ['activites', 'jeunes'], minimum: 1 },
+  auMoinsUn: ['salles', 'tag'],
+  champs: [
+    { cle: 'salles', libelle: 'Salles acceptées', forme: 'ids', table: 'salles' },
+    {
+      cle: 'tag',
+      libelle: 'Tag de salle',
+      forme: 'texte',
+      aide: 'Alternative à la liste : toute salle portant ce tag convient. Il faut l’un des deux.',
+    },
+  ],
 
   valide(regle: Regle, ref: Referentiel): Probleme[] {
     const salles = litListe(regle, 'salles');

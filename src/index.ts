@@ -18,11 +18,14 @@ export {
   ajouteCreneau,
   ajouteEducateur,
   ajouteJeune,
+  ajouteRegle,
   ajouteSalle,
   modifieActivite,
   modifieCreneau,
   modifieEducateur,
   modifieJeune,
+  modifieParamRegle,
+  modifieRegle,
   modifieSalle,
   retireDuCreneau,
   structureVierge,
@@ -30,6 +33,7 @@ export {
   supprimeCreneau,
   supprimeEducateur,
   supprimeJeune,
+  supprimeRegle,
   supprimeSalle,
   termineCreneauA,
   type ChangementCreneau,
@@ -67,8 +71,12 @@ export {
 
 export {
   COUT_REGLE_DURE,
+  champPorte,
+  type ChampRegle,
+  type CiblesAttendues,
   type ContexteEvaluation,
   type EvaluateurRegle,
+  type TableCible,
   type Violation,
 } from './regles/base.ts';
 export { catalogue, evaluateurDe, typesConnus } from './regles/registre.ts';

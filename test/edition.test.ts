@@ -6,6 +6,7 @@ import {
   ajouteCreneau,
   ajouteEducateur,
   ajouteJeune,
+  ajouteRegle,
   ajouteSalle,
   calculDisponibilite,
   educateursRequis,
@@ -14,6 +15,8 @@ import {
   planningInitial,
   modifieCreneau,
   modifieJeune,
+  modifieParamRegle,
+  modifieRegle,
   modifieSalle,
   retireDuCreneau,
   structureVierge,
@@ -21,6 +24,7 @@ import {
   supprimeCreneau,
   supprimeEducateur,
   supprimeJeune,
+  supprimeRegle,
   supprimeSalle,
   termineCreneauA,
   valideStructure,
@@ -344,5 +348,76 @@ describe('salles — elles se saisissent dans l application', () => {
     const s = supprimeSalle(structureMinimale(), 'sa');
     assert.equal(s.planningType[0]!.salleId, null);
     assert.deepEqual(valideStructure(s).problemes.filter((p) => p.gravite === 'erreur'), []);
+  });
+});
+
+describe('édition des règles', () => {
+  it('prend `dure` et les défauts dans le descripteur du type, pas dans l’appel', () => {
+    // C'est le moteur qui sait ce qu'un type attend. Si l'interface devait le
+    // redire, elle deviendrait la seconde source de vérité que l'architecture
+    // refuse — et les deux divergeraient au premier type ajouté.
+    const s = ajouteRegle(structureMinimale(), {
+      type: 'rotation_educateur',
+      cibles: { jeunes: ['ja'] },
+    });
+    const r = s.regles[0]!;
+    assert.equal(r.dure, false, '`rotation_educateur` est souple par défaut');
+    assert.equal(r.params?.['tousLesPas'], 4, 'défaut du descripteur');
+    assert.equal(r.params?.['porte'], 'binome', 'défaut de portée, propre à ce type');
+    assert.equal(r.actif, true);
+    assert.deepEqual(valideStructure(s).problemes.filter((p) => p.gravite === 'erreur'), []);
+  });
+
+  it('refuse un type que rien n’évaluera jamais', () => {
+    assert.throws(() => ajouteRegle(structureMinimale(), { type: 'inventee' }), /inventee/);
+  });
+
+  it('ne réutilise pas un identifiant déjà pris', () => {
+    let s = structureMinimale();
+    s = ajouteRegle(s, { type: 'jeunes_incompatibles', cibles: { jeunes: ['ja', 'jb'] } });
+    s = ajouteRegle(s, { type: 'jeunes_incompatibles', cibles: { jeunes: ['ja', 'jb'] } });
+    assert.equal(new Set(s.regles.map((r) => r.id)).size, 2);
+  });
+
+  it('retire un paramètre au lieu de le poser à `undefined`', () => {
+    // Un param absent et un param vide ne sont pas la même chose : le second
+    // s'écrirait `null` dans le fichier, que le schéma refuse.
+    let s = ajouteRegle(structureMinimale(), {
+      type: 'quota_detachement',
+      cibles: { educateurs: ['ea'] },
+      params: { maxPasParJour: 4, maxPasParSemaine: 20 },
+    });
+    const id = s.regles[0]!.id;
+    s = modifieParamRegle(s, id, 'maxPasParJour', undefined);
+    assert.ok(!('maxPasParJour' in (s.regles[0]!.params ?? {})), 'la clé disparaît');
+    assert.equal(s.regles[0]!.params?.['maxPasParSemaine'], 20, 'les autres ne bougent pas');
+  });
+
+  it('retire le poids quand une règle passe de souple à dure', () => {
+    // Un spread `{ ...regle, poids: undefined }` GARDE la clé, avec `undefined`
+    // pour valeur : `JSON.stringify` la laisse tomber à l'export, mais la
+    // validation en mémoire voit un `poids` présent et non numérique.
+    let s = ajouteRegle(structureMinimale(), {
+      type: 'rotation_educateur',
+      cibles: { jeunes: ['ja'] },
+    });
+    const id = s.regles[0]!.id;
+    s = modifieRegle(s, id, { poids: 70 });
+    assert.equal(s.regles[0]!.poids, 70);
+
+    s = modifieRegle(s, id, { dure: true, poids: undefined });
+    assert.ok(!('poids' in s.regles[0]!), 'la clé disparaît, elle ne vaut pas undefined');
+    assert.deepEqual(valideStructure(s).problemes.filter((p) => p.gravite === 'erreur'), []);
+  });
+
+  it('supprime une règle sans rien laisser derrière', () => {
+    let s = ajouteRegle(structureMinimale(), {
+      type: 'jeunes_incompatibles',
+      cibles: { jeunes: ['ja', 'jb'] },
+    });
+    const id = s.regles[0]!.id;
+    s = supprimeRegle(s, id);
+    assert.deepEqual(s.regles, []);
+    assert.throws(() => supprimeRegle(s, id), /Regle inconnue/);
   });
 });

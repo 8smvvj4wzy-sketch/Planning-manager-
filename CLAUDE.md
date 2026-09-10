@@ -214,6 +214,21 @@ tests et n'est jamais importé depuis `interface/`.
   tests : `valideStructure` sans erreur ne prouve pas que le moteur voit les gens ; il faut
   aller jusqu'à `educateursRequis` et `mobilisable`.
 
+- **Un paramètre facultatif non déclaré est invisible, et aucun test évident ne le voit.**
+  Les descripteurs (`EvaluateurRegle.champs`, `src/regles/base.ts`) disent à l'interface ce
+  qu'un type de règle attend. Un champ **obligatoire** oublié se fait attraper — la règle
+  bâtie depuis le descripteur échoue à `valide()`. Un champ **facultatif** oublié ne se fait
+  attraper par rien : `valide()` ne l'exige pas, donc tout est vert, et l'utilisateur n'a
+  simplement aucun moyen de l'atteindre. Arrivé à `fenetre` (`rotation_educateur`). D'où le
+  dernier contrôle de `test/descripteurs.test.ts`, qui compare les clés **lues par le code**
+  du catalogue aux clés déclarées. C'est un grep : une clé construite dynamiquement lui
+  échapperait. Voir `docs/decisions.md` §25.
+- **`{ ...regle, poids: undefined }` garde la clé.** `JSON.stringify` la laisse tomber, donc
+  l'export a l'air correct — mais la validation en mémoire voit un `poids` présent et non
+  numérique, et refuse la structure juste après un geste anodin. Dans `src/edition.ts`,
+  `undefined` **retire** la clé (`modifieRegle`, `modifieParamRegle`). Passer une règle de
+  souple à dure passe par là.
+
 ## Avant toute livraison
 
 ```bash

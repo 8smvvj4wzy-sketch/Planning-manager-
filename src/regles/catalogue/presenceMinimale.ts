@@ -24,6 +24,19 @@ import {
 export const presenceMinimale: EvaluateurRegle = {
   type: 'presence_minimale',
   dureParDefaut: true,
+  libelle: 'Présence minimale',
+  resume: 'Ce groupe ne descend jamais sous ce nombre d’éducateurs, pauses exclues.',
+  cibles: { cles: ['groupes'], minimum: 1 },
+  champs: [
+    {
+      cle: 'educMin',
+      libelle: 'Éducateurs au minimum',
+      forme: 'nombre',
+      min: 0,
+      defaut: 1,
+      obligatoire: true,
+    },
+  ],
 
   valide(regle: Regle, ref: Referentiel): Probleme[] {
     return [

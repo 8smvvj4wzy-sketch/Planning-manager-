@@ -18,6 +18,7 @@ import type { Probleme } from '../../validation/resultat.ts';
 import { erreur } from '../../validation/resultat.ts';
 import { educateursSelonPorte } from '../../affectations.ts';
 import {
+  champPorte,
   chemin,
   exigeCibles,
   exigePorteValide,
@@ -33,6 +34,19 @@ import {
 export const educateursInterdits: EvaluateurRegle = {
   type: 'educateurs_interdits',
   dureParDefaut: true,
+  libelle: 'Éducateurs interdits',
+  resume: 'Ce jeune ne doit pas être encadré par les éducateurs de cette liste.',
+  cibles: { cles: ['jeunes'], minimum: 1 },
+  champs: [
+    {
+      cle: 'educateurs',
+      libelle: 'Éducateurs interdits',
+      forme: 'ids',
+      table: 'educateurs',
+      obligatoire: true,
+    },
+    champPorte('presence'),
+  ],
 
   valide(regle: Regle, ref: Referentiel): Probleme[] {
     const problemes = exigeCibles(regle, ref, 'jeunes');

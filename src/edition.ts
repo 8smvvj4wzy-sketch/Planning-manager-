@@ -22,10 +22,12 @@
  */
 
 import { idUnique } from './import/identifiants.ts';
+import { evaluateurDe } from './regles/registre.ts';
 import { heureEnMinutes } from './temps.ts';
 import type {
   Activite,
   Affectation,
+  Cibles,
   CreneauType,
   Educateur,
   Heure,
@@ -33,6 +35,7 @@ import type {
   Jour,
   Plage,
   Quinzaine,
+  Regle,
   Salle,
   Semaine,
   Structure,
@@ -430,4 +433,102 @@ export function supprimeSalle(structure: Structure, id: string): Structure {
     ),
     planningType: structure.planningType.map((c) => (c.salleId === id ? { ...c, salleId: null } : c)),
   };
+}
+
+// --- regles -----------------------------------------------------------------
+
+/**
+ * Ajoute une regle d'un type connu.
+ *
+ * `dure` et les defauts des params viennent du descripteur du type, pas de
+ * l'appelant : c'est le moteur qui sait ce qu'un type attend, et l'interface
+ * n'a pas a le redire. Un type inconnu leve — mieux vaut refuser que poser
+ * dans la structure une regle que rien n'evaluera jamais.
+ */
+export function ajouteRegle(
+  structure: Structure,
+  depart: { type: string; cibles?: Cibles; params?: Record<string, unknown>; commentaire?: string },
+): Structure {
+  const evaluateur = evaluateurDe(depart.type);
+  if (!evaluateur) throw new Error(`Type de regle inconnu : "${depart.type}"`);
+
+  const params: Record<string, unknown> = {};
+  for (const champ of evaluateur.champs) {
+    if ('defaut' in champ && champ.defaut !== undefined) params[champ.cle] = champ.defaut;
+  }
+  Object.assign(params, depart.params ?? {});
+
+  const regle: Regle = {
+    id: idUnique(depart.type, new Set(structure.regles.map((r) => r.id))),
+    type: depart.type,
+    dure: evaluateur.dureParDefaut,
+    actif: true,
+    cibles: depart.cibles ?? {},
+    params,
+    ...(depart.commentaire ? { commentaire: depart.commentaire } : {}),
+  };
+  return { ...structure, regles: [...structure.regles, regle] };
+}
+
+/**
+ * Modifie une regle. Une cle posee explicitement a `undefined` la RETIRE.
+ *
+ * Ce n'est pas ce que fait un spread : `{ ...regle, poids: undefined }` garde
+ * la cle, avec `undefined` pour valeur. `JSON.stringify` la laisserait tomber a
+ * l'export, mais la validation en memoire, elle, verrait un `poids` present et
+ * non numerique — un fichier refuse juste apres un geste anodin, exactement le
+ * genre de piege que ce module existe pour eviter. Passer une regle de souple a
+ * dure passe par la.
+ */
+export function modifieRegle(
+  structure: Structure,
+  id: string,
+  changement: Partial<Omit<Regle, 'id' | 'type'>>,
+): Structure {
+  if (!structure.regles.some((r) => r.id === id)) throw new Error(`Regle inconnue : "${id}"`);
+  return {
+    ...structure,
+    regles: structure.regles.map((r) => {
+      if (r.id !== id) return r;
+      const suite: Regle = { ...r };
+      for (const [cle, valeur] of Object.entries(changement)) {
+        const cible = suite as unknown as Record<string, unknown>;
+        if (valeur === undefined) delete cible[cle];
+        else cible[cle] = valeur;
+      }
+      return suite;
+    }),
+  };
+}
+
+/**
+ * Change un parametre d'une regle sans toucher aux autres.
+ *
+ * `undefined` RETIRE la cle plutot que de la poser a `undefined` : un param
+ * present et vide n'est pas la meme chose qu'un param absent — `litNombre` et
+ * `litTexte` rendraient `undefined` dans les deux cas, mais le fichier ecrit
+ * porterait un `null` que le schema refuse.
+ */
+export function modifieParamRegle(
+  structure: Structure,
+  id: string,
+  cle: string,
+  valeur: unknown,
+): Structure {
+  const regle = structure.regles.find((r) => r.id === id);
+  if (!regle) throw new Error(`Regle inconnue : "${id}"`);
+  const params = { ...(regle.params ?? {}) };
+  if (valeur === undefined) delete params[cle];
+  else params[cle] = valeur;
+  return modifieRegle(structure, id, { params });
+}
+
+/**
+ * Une regle ne se supprime pas a moitie : rien d'autre dans la structure ne la
+ * nomme. C'est la seule suppression de ce module qui n'a aucune reference a
+ * nettoyer — l'inverse exact de `supprimeSalle`.
+ */
+export function supprimeRegle(structure: Structure, id: string): Structure {
+  if (!structure.regles.some((r) => r.id === id)) throw new Error(`Regle inconnue : "${id}"`);
+  return { ...structure, regles: structure.regles.filter((r) => r.id !== id) };
 }

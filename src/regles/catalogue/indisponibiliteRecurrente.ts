@@ -30,6 +30,21 @@ import {
 export const indisponibiliteRecurrente: EvaluateurRegle = {
   type: 'indisponibilite_recurrente',
   dureParDefaut: true,
+  libelle: 'Indisponibilité récurrente',
+  resume: 'Cet éducateur n’est jamais mobilisable sur ce créneau hebdomadaire.',
+  cibles: { cles: ['educateurs'], minimum: 1 },
+  champs: [
+    {
+      cle: 'jour',
+      libelle: 'Jour',
+      forme: 'choix',
+      options: [...JOURS],
+      defaut: 'lundi',
+      obligatoire: true,
+    },
+    { cle: 'debut', libelle: 'De', forme: 'heure', defaut: '09:00', obligatoire: true },
+    { cle: 'fin', libelle: 'À', forme: 'heure', defaut: '12:00', obligatoire: true },
+  ],
 
   valide(regle: Regle, ref: Referentiel): Probleme[] {
     const problemes = [
