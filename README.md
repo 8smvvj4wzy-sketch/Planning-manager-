@@ -31,12 +31,23 @@ imprime le planning obtenu.
 
 ## L'application
 
-**Écran Planning** — la grille, par salle, par éducateur ou par jeune. Une case vide sur
-l'axe « salle » est une salle libre : ce n'est pas un module à part, c'est la même
-grille lue à l'envers. Cliquer un créneau l'ouvre et le **modifie** : horaires, salle,
-jeunes, éducateurs, suppression. Un planning importé arrive presque toujours avec de
-vraies collisions — deux activités au même moment, quelqu'un affecté deux fois : elles
-sont listées au-dessus de la grille, et cliquer l'une d'elles ouvre le créneau fautif.
+**Écran Planning** — quatre vues d'une même journée :
+
+- **par activité** (par défaut) — le temps à gauche, les activités côte à côte, chacune
+  listant ses paires « Jeune / Éducateur ». C'est la forme d'un planning d'IME tel qu'il
+  s'écrit vraiment. Les colonnes ne sont pas des personnes mais des *couloirs*
+  d'activités simultanées : trois ou quatre suffisent là où une colonne par jeune en
+  demandait quinze.
+- **par salle** — une colonne par salle, plus une colonne « sans salle » tant qu'il en
+  reste à placer. Une case vide est une salle libre : la vue « salles libres » n'est pas
+  un module à part, c'est cette grille lue à l'envers.
+- **fiche d'un jeune** / **fiche d'un éducateur** — une journée en liste, avec qui elle se
+  passe, et les trous marqués.
+
+Cliquer un créneau l'ouvre et le **modifie** : horaires, salle, jeunes, éducateurs,
+suppression. Un planning importé arrive presque toujours avec de vraies collisions — deux
+activités au même moment, quelqu'un affecté deux fois : elles sont listées au-dessus de la
+grille, et cliquer l'une d'elles ouvre le créneau fautif.
 
 **Écran Période** — une situation qui dure (« Lucas absent du 14 au 19 ») projetée sur
 chaque jour d'accueil, jusqu'au **retour au fonctionnement initial** — la première date

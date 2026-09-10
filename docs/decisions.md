@@ -544,3 +544,41 @@ ne soit pas en lecture seule, et c'est délibéré : le reste vient d'un fichier
 problème dont le pointeur vise un créneau (`/planningType/14`) est désormais cliquable :
 l'écran se recale sur le bon jour, bascule sur le planning type, et ouvre le créneau.
 C'est ce qui transforme une liste en file de travail.
+
+## 16. Le planning doit ressembler au planning
+
+Les trois vues de la grille — par salle, par éducateur, par jeune — plaçaient une colonne
+par *ressource*. L'utilisateur a tranché en une phrase : « la vue découpée par jeunes ne
+me convient pas », et « ça doit ressembler au planning que j'ai fourni ».
+
+Il avait raison, et le défaut était structurel. Une colonne par jeune découpe une activité
+collective en autant de blocs qu'elle a d'enfants : l'accueil du matin, une seule chose
+dans la tête de l'équipe, apparaissait cinq fois. Personne ne lit un planning comme ça.
+
+Son document, lui, met le temps à gauche et les activités côte à côte, chacune listant ses
+paires « Jeune / Éducateur ». Les colonnes n'y sont pas des ressources : ce sont des
+**couloirs** d'activités simultanées, sans identité fixe. `couloirsDuJour`
+(`src/vues.ts`) les reconstitue par rangement d'intervalles — trois ou quatre colonnes au
+lieu de quinze, et l'accueil redevient un bloc unique.
+
+Le sort d'une personne en particulier n'est pas perdu pour autant, il change de forme :
+`journeeDe` rend sa journée en liste chronologique, avec qui elle se passe et les trous
+marqués. Une seule fonction pour les deux sens — le sujet et le vis-à-vis s'échangent —
+et le vis-à-vis vient de `educateursAupresDe` / `jeunesSelonPorte`, repli documenté
+compris. C'est le « juste le planning d'un jeune, et inversement pour les éducateurs »
+demandé.
+
+**Deux défauts de forme corrigés au passage, de la même famille.**
+
+L'axe des temps se graduait sur les **pas** : 78 lignes de 34 px pour une journée au pas
+de 5 minutes, là où le document en porte treize. `bornesDuJour` ne rend que les moments où
+quelque chose change. Et la hauteur d'une bande ne peut pas suivre la seule durée : une
+heure d'accueil à cinq paires demande plus de place qu'une heure de repas, et la rogner
+tronque des noms. Elle suit donc la durée **et** ce que le contenu réclame — un tableur
+fait pareil.
+
+Enfin, « Jeunes sans affectation » listait `11:15 · 11:20 · 11:25 · …` et « Salles
+libres » répétait 78 fois la même ligne. `plagesDePas` replie des pas contigus. C'est la
+troisième fois dans ce projet que le pas-à-pas du moteur remonte tel quel à l'écran (voir
+§14 pour les chevauchements) : **le moteur a raison de raisonner pas par pas, l'écran a
+tort de le recopier.**
