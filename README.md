@@ -67,7 +67,9 @@ c'est ce qui a été imprimé et annoncé à l'équipe, ça ne bouge plus. « Re
 relance le moteur à côté et montre ce qui aurait changé, sans rien écraser.
 
 **Écran Fichiers** — importer un `structure.json`, ou un planning collé/déposé depuis un
-tableur (Numbers, Excel). Un écran de correspondance classe chaque nom rencontré —
+tableur (Numbers, Excel). Les **dix derniers fichiers déposés** y restent, pour les
+reprendre sans les redemander : sur ce poste seulement, et « Vider ce poste » les efface
+avec le reste. Un écran de correspondance classe chaque nom rencontré —
 jeune, éducateur, ou à ignorer — avant que quoi que ce soit ne soit chargé : un tableur
 dit « Marie Dupont », jamais `e1`.
 

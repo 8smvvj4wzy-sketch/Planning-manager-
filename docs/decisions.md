@@ -734,3 +734,26 @@ chevauchements ordinaires — `verifieChevauchements` traite déjà `salleId` co
 ressource — et la vue « par salle » les montre, colonne « sans salle » comprise. C'était
 la décision prise avec l'utilisateur : les salles se saisissent à la main, l'application
 signale les conflits, elle ne place rien toute seule.
+
+## 22. Garder les fichiers importés, sur ce poste seulement
+
+Un planning se reprend en plusieurs fois : on importe, on corrige, on s'interrompt, et le
+lendemain le fichier n'est plus sous la main. Les dix derniers fichiers déposés sont donc
+gardés, avec leur nom et leur date, et se rechargent d'un clic.
+
+**Seul un fichier DÉPOSÉ est mémorisé.** `analyseTexte` est aussi appelée à chaque frappe
+dans la zone de collage : enregistrer là produirait une entrée par caractère. Le nom du
+fichier, lui, arrivait déjà — `ZoneDepot` transmet `(contenu, nom)` depuis le début.
+
+**Un fichier trop gros n'est pas gardé** (200 ko ; l'export réel en fait 8). Le quota du
+navigateur se remplit en silence, et perdre la structure chargée pour avoir voulu garder
+une copie du tableur serait un mauvais échange. `ecrireStockage` relit derrière lui, donc
+un dépassement se voit quand même — autant ne pas le provoquer.
+
+**Ils portent de vrais prénoms.** Ils restent dans le stockage local de ce poste, n'entrent
+dans aucun export, et « Vider ce poste » les efface avec le reste. Cette dernière ligne
+n'est pas décorative : le bouton porte **la seule énumération des clés** de l'application,
+et une clé qu'on oublierait d'y inscrire survivrait à un vidage sans que personne ne s'en
+aperçoive. C'est le corollaire du piège de collision de `localStorage` — trois applications
+partagent la même adresse `github.io`, donc jamais de `clear()` global, donc une liste
+explicite qu'il faut tenir à jour.
