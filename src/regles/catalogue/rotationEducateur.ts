@@ -21,6 +21,7 @@ import type { Probleme } from '../../validation/resultat.ts';
 import { educateursSelonPorte } from '../../affectations.ts';
 import type { PorteRegle } from '../../types.ts';
 import {
+  champPorte,
   exigeCibles,
   exigeNombre,
   exigePorteValide,
@@ -44,6 +45,28 @@ function sequence(ctx: ContexteEvaluation, jeuneId: string, porte: PorteRegle): 
 export const rotationEducateur: EvaluateurRegle = {
   type: 'rotation_educateur',
   dureParDefaut: false,
+  libelle: 'Rotation des éducateurs',
+  resume: 'Ce jeune ne doit pas garder le même accompagnant trop longtemps.',
+  cibles: { cles: ['jeunes'], minimum: 1 },
+  champs: [
+    {
+      cle: 'tousLesPas',
+      libelle: 'Changer tous les',
+      forme: 'nombre',
+      min: 1,
+      defaut: 4,
+      obligatoire: true,
+      aide: 'En nombre de pas de grille — avec un pas de 5 minutes, 4 vaut vingt minutes, pas quatre heures.',
+    },
+    {
+      cle: 'fenetre',
+      libelle: 'Fenêtre glissante',
+      forme: 'nombre',
+      min: 2,
+      aide: 'Sur toute tranche de N pas de présence, exiger au moins deux accompagnants différents. Laisser vide pour ne vérifier que la durée continue.',
+    },
+    champPorte('binome'),
+  ],
 
   valide(regle: Regle, ref: Referentiel): Probleme[] {
     return [

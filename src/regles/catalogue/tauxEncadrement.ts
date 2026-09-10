@@ -25,6 +25,20 @@ import {
 export const tauxEncadrement: EvaluateurRegle = {
   type: 'taux_encadrement',
   dureParDefaut: true,
+  libelle: 'Taux d’encadrement',
+  resume: 'Fixe le nombre de jeunes par éducateur pour ces groupes ou ces activités.',
+  cibles: { cles: ['groupes', 'activites'], minimum: 1 },
+  champs: [
+    {
+      cle: 'ratioJeunesParEduc',
+      libelle: 'Jeunes par éducateur',
+      forme: 'nombre',
+      min: 1,
+      defaut: 4,
+      obligatoire: true,
+      aide: 'N’a d’effet qu’en mode « ratio de groupe » ; le mode individuel somme les encadrements.',
+    },
+  ],
 
   valide(regle: Regle, ref: Referentiel): Probleme[] {
     const problemes = [

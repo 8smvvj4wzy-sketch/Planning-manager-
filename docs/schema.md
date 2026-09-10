@@ -283,20 +283,30 @@ Format commun à toutes les règles :
 
 ### Catalogue des types de règles
 
+> Cette table décrivait un catalogue plus pauvre que le code : `porte`, `mode` et `sur`
+> y manquaient. Elle se régénère maintenant depuis les descripteurs
+> (`EvaluateurRegle.cibles` et `.champs`), qui sont la source. Les paramètres en
+> **gras** sont obligatoires ; les autres ont un défaut ou sont facultatifs.
+
 | type | cibles | params | dure par défaut |
 |---|---|---|---|
-| `educateurs_autorises` | `jeunes` | `educateurs[]` | oui |
-| `educateurs_interdits` | `jeunes` | `educateurs[]` | oui |
-| `binome_jeunes` | `jeunes` (2+) | `educateursRequis` | non |
+| `educateurs_autorises` | `jeunes` | **`educateurs[]`**, `mode`, `porte` (`binome`) | oui |
+| `educateurs_interdits` | `jeunes` | **`educateurs[]`**, `porte` (`presence`) | oui |
+| `binome_jeunes` | `jeunes` (2+) | **`educateursRequis`** | non |
 | `jeunes_incompatibles` | `jeunes` (2+) | — | oui |
-| `rotation_educateur` | `jeunes` | `tousLesPas`, `fenetre` | non |
+| `rotation_educateur` | `jeunes` | **`tousLesPas`**, `fenetre`, `porte` (`binome`) | non |
 | `quota_detachement` | `educateurs` | `maxPasParJour`, `maxPasParSemaine` | oui |
-| `perimetre_renfort` | `educateurs` | `jeunesAutorises[]`, `activitesAutorisees[]` | oui |
-| `taux_encadrement` | `groupes` ou `activites` | `ratioJeunesParEduc` | oui |
-| `salle_requise` | `activites` ou `jeunes` | `salles[]` ou `tag` | oui |
-| `continuite_journee` | `jeunes` | `maxChangements` | non |
-| `presence_minimale` | `groupes` | `educMin` | oui |
-| `indisponibilite_recurrente` | `educateurs` | `jour`, `debut`, `fin` | oui |
+| `perimetre_renfort` | `educateurs` | `jeunesAutorises[]`, `activitesAutorisees[]`, `porte` (`presence`) | oui |
+| `taux_encadrement` | `groupes` **ou** `activites` | **`ratioJeunesParEduc`** | oui |
+| `salle_requise` | `activites` **ou** `jeunes` | `salles[]` **ou** `tag` | oui |
+| `continuite_journee` | `jeunes` | **`maxChangements`**, `sur`, `porte` (`binome`) | non |
+| `presence_minimale` | `groupes` | **`educMin`** | oui |
+| `indisponibilite_recurrente` | `educateurs` | **`jour`**, **`debut`**, **`fin`** | oui |
+
+`quota_detachement` sans aucun de ses deux maxima, et `perimetre_renfort` sans périmètre,
+ne contraignent rien : la validation le signale en **avertissement**, pas en erreur. Ce
+n'est donc pas la même exigence qu'un paramètre obligatoire, et les descripteurs ne le
+prétendent pas.
 
 ### Exemples correspondant à tes cas
 

@@ -18,6 +18,10 @@ import {
 export const jeunesIncompatibles: EvaluateurRegle = {
   type: 'jeunes_incompatibles',
   dureParDefaut: true,
+  libelle: 'Jeunes incompatibles',
+  resume: 'Ces jeunes ne doivent pas se retrouver sur le même créneau.',
+  cibles: { cles: ['jeunes'], minimum: 2 },
+  champs: [],
 
   valide(regle: Regle, ref: Referentiel): Probleme[] {
     return [

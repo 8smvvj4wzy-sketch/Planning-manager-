@@ -24,6 +24,20 @@ import {
 export const binomeJeunes: EvaluateurRegle = {
   type: 'binome_jeunes',
   dureParDefaut: false,
+  libelle: 'Binôme de jeunes',
+  resume: 'Quand ces jeunes sont ensemble et seuls, l’encadrement vaut ce nombre.',
+  cibles: { cles: ['jeunes'], minimum: 2 },
+  champs: [
+    {
+      cle: 'educateursRequis',
+      libelle: 'Éducateurs requis',
+      forme: 'nombre',
+      min: 0,
+      defaut: 1,
+      obligatoire: true,
+      aide: 'Remplace le calcul par somme des encadrements, mais seulement si le créneau ne porte que ces jeunes-là.',
+    },
+  ],
 
   valide(regle: Regle, ref: Referentiel): Probleme[] {
     return [

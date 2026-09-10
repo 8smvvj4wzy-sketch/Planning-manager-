@@ -18,6 +18,7 @@ import type { Referentiel } from '../../referentiel.ts';
 import type { Probleme } from '../../validation/resultat.ts';
 import { educateursSelonPorte } from '../../affectations.ts';
 import {
+  champPorte,
   chemin,
   exigeCibles,
   exigePorteValide,
@@ -35,6 +36,27 @@ import { erreur } from '../../validation/resultat.ts';
 export const educateursAutorises: EvaluateurRegle = {
   type: 'educateurs_autorises',
   dureParDefaut: true,
+  libelle: 'Éducateurs autorisés',
+  resume: 'Ce jeune ne peut être encadré que par les éducateurs de cette liste.',
+  cibles: { cles: ['jeunes'], minimum: 1 },
+  champs: [
+    {
+      cle: 'educateurs',
+      libelle: 'Éducateurs autorisés',
+      forme: 'ids',
+      table: 'educateurs',
+      obligatoire: true,
+    },
+    {
+      cle: 'mode',
+      libelle: 'Mode',
+      forme: 'choix',
+      options: ['exclusif', 'au-moins-un'],
+      defaut: 'exclusif',
+      aide: '« exclusif » : aucun autre éducateur. « au-moins-un » : il suffit que l’un d’eux soit là.',
+    },
+    champPorte('binome'),
+  ],
 
   valide(regle: Regle, ref: Referentiel): Probleme[] {
     const problemes = exigeCibles(regle, ref, 'jeunes');

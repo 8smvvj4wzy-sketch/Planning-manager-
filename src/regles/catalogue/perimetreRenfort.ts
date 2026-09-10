@@ -17,6 +17,7 @@ import type { Probleme } from '../../validation/resultat.ts';
 import { avertissement } from '../../validation/resultat.ts';
 import { jeunesSelonPorte } from '../../affectations.ts';
 import {
+  champPorte,
   chemin,
   exigeCibles,
   exigePorteValide,
@@ -32,6 +33,20 @@ import {
 export const perimetreRenfort: EvaluateurRegle = {
   type: 'perimetre_renfort',
   dureParDefaut: true,
+  libelle: 'Périmètre d’un renfort',
+  resume: 'Ce renfort ne peut intervenir qu’auprès de ces jeunes ou sur ces activités.',
+  cibles: { cles: ['educateurs'], minimum: 1 },
+  champs: [
+    { cle: 'jeunesAutorises', libelle: 'Jeunes autorisés', forme: 'ids', table: 'jeunes' },
+    {
+      cle: 'activitesAutorisees',
+      libelle: 'Activités autorisées',
+      forme: 'ids',
+      table: 'activites',
+      aide: 'Sans jeunes ni activités, la règle ne contraint rien — la validation le signale.',
+    },
+    champPorte('presence'),
+  ],
 
   valide(regle: Regle, ref: Referentiel): Probleme[] {
     const jeunes = litListe(regle, 'jeunesAutorises');

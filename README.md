@@ -73,8 +73,10 @@ avec le reste. Un écran de correspondance classe chaque nom rencontré —
 jeune, éducateur, ou à ignorer — avant que quoi que ce soit ne soit chargé : un tableur
 dit « Marie Dupont », jamais `e1`.
 
-**Écran Règles** — activer, pondérer, régler la portée (`presence` / `binome`) des
-règles chargées. **Écran Structure** — jeunes, éducateurs, activités et salles s'y
+**Écran Règles** — créer, supprimer et régler entièrement une règle : cibles, paramètres,
+nature (dure / souple), poids, portée. Le formulaire de chaque type est bâti d'après ce que
+le moteur déclare attendre (`EvaluateurRegle.champs`), pas d'après une table écrite dans
+l'interface — celle-ci ne connaît aucune règle, seulement cinq formes de champ. **Écran Structure** — jeunes, éducateurs, activités et salles s'y
 **saisissent** ; présences, disponibilités et groupes restent en lecture, ils viennent du
 fichier.
 
@@ -160,7 +162,14 @@ dans [`docs/decisions.md`](./docs/decisions.md).
 ## Les règles
 
 Les douze types du catalogue sont implémentés. **Ajouter une règle, c'est ajouter une
-entrée dans le tableau `regles` du fichier — jamais toucher au code.**
+entrée dans le tableau `regles` — depuis l'écran Règles, ou à la main dans le fichier.
+Jamais toucher au code.**
+
+Chaque type déclare ce qu'il attend, à côté de son évaluateur : `cibles` (quelles clés,
+combien au minimum) et `champs` (les paramètres, leur forme, leur défaut, ce qui est
+obligatoire). C'est ce qui permet à l'interface de construire un formulaire sans rien
+savoir des règles. Un test parcourt le catalogue et vérifie que ces déclarations ne
+mentent pas sur `valide()`, dans les deux sens.
 
 | type | cibles | params |
 |---|---|---|

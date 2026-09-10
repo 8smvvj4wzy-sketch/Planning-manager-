@@ -47,6 +47,7 @@ import {
   ajouteCreneau,
   ajouteEducateur,
   ajouteJeune,
+  ajouteRegle,
   ajouteSalle,
   assemble,
   bornesDuJour,
@@ -72,6 +73,8 @@ import {
   modifieCreneau,
   modifieEducateur,
   modifieJeune,
+  modifieParamRegle,
+  modifieRegle,
   modifieSalle,
   nomsRencontres,
   optionsAvec,
@@ -86,6 +89,7 @@ import {
   supprimeCreneau,
   supprimeEducateur,
   supprimeJeune,
+  supprimeRegle,
   supprimeSalle,
   termineCreneauA,
   validePeriode,
@@ -2280,9 +2284,113 @@ function nomDeCible(referentiel, cle, id) {
   return id;
 }
 
-function CarteRegle({ referentiel, regle, index, onChange }) {
+/* Le catalogue d'ids d'une table, au format que ListePersonnes attend.
+   C'est la seule traduction que cet écran fait : le reste vient des
+   descripteurs du moteur, jamais d'une table écrite ici. */
+function catalogueDeTable(referentiel, table) {
+  const s = referentiel.structure;
+  if (table === 'jeunes')
+    return s.jeunes.filter((j) => j.actif).map((j) => ({ id: j.id, nom: referentiel.libelleJeune(j.id) }));
+  if (table === 'educateurs')
+    return s.educateurs.filter((e) => e.actif).map((e) => ({ id: e.id, nom: referentiel.libelleEducateur(e.id) }));
+  if (table === 'groupes') return s.groupes.map((g) => ({ id: g.id, nom: g.nom }));
+  if (table === 'activites') return s.activites.map((a) => ({ id: a.id, nom: a.nom }));
+  if (table === 'salles') return s.salles.map((x) => ({ id: x.id, nom: x.nom }));
+  return [];
+}
+
+const COULEUR_TABLE = {
+  jeunes: CAT_INDIGO,
+  educateurs: CAT_TEAL,
+  groupes: CAT_VIOLET,
+  activites: CAT_CYAN,
+  salles: CAT_AMBER,
+};
+
+/* Un champ de paramètre, rendu d'après sa seule déclaration.
+   Ce composant ne connaît AUCUNE règle : il connaît cinq formes. Ajouter un
+   type de règle ne le touche pas ; ajouter une forme, si — et c'est le seul
+   endroit du JSX qu'il faudrait alors ouvrir. */
+function ChampParametre({ champ, valeur, referentiel, onChange }) {
+  if (champ.forme === 'ids') {
+    const ids = Array.isArray(valeur) ? valeur : [];
+    return (
+      <dl className="m-0">
+        <ListePersonnes
+          titre={champ.libelle}
+          couleur={COULEUR_TABLE[champ.table] ?? CAT_ARDOISE}
+          ids={ids}
+          catalogue={catalogueDeTable(referentiel, champ.table)}
+          vide={{
+            texte: catalogueDeTable(referentiel, champ.table).length === 0 ? 'rien à choisir' : 'à choisir',
+            alerte: Boolean(champ.obligatoire),
+          }}
+          titrePour={() => ''}
+          editable
+          onRetirer={(id) => onChange(ids.filter((x) => x !== id))}
+          onAjouter={(id) => onChange([...ids, id])}
+        />
+        {champ.aide && (
+          <span className="mt-1 block text-xs" style={{ color: 'var(--ink-soft)' }}>
+            {champ.aide}
+          </span>
+        )}
+      </dl>
+    );
+  }
+
+  if (champ.forme === 'choix') {
+    return (
+      <Champ libelle={champ.libelle} aide={champ.aide}>
+        <Selecteur
+          valeur={valeur ?? champ.defaut ?? champ.options[0]}
+          onChange={(v) => onChange(v)}
+          options={champ.options.map((o) => ({ valeur: o, libelle: o }))}
+        />
+      </Champ>
+    );
+  }
+
+  if (champ.forme === 'nombre') {
+    return (
+      <Champ libelle={champ.libelle} aide={champ.aide}>
+        <input
+          type="number"
+          min={champ.min ?? 0}
+          step="any"
+          className="w-full rounded-xl border px-3 py-2 text-sm"
+          style={styleSaisie}
+          value={valeur ?? ''}
+          // Vider le champ RETIRE le paramètre au lieu de poser 0 : « pas de
+          // quota » et « quota nul » ne sont pas la même chose.
+          onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))}
+        />
+      </Champ>
+    );
+  }
+
+  return (
+    <Champ libelle={champ.libelle} aide={champ.aide}>
+      <input
+        type={champ.forme === 'heure' ? 'time' : 'text'}
+        className="w-full rounded-xl border px-3 py-2 text-sm"
+        style={styleSaisie}
+        value={valeur ?? ''}
+        onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value)}
+      />
+    </Champ>
+  );
+}
+
+function CarteRegle({ referentiel, regle, structure, setStructure }) {
   const evaluateur = catalogue().find((e) => e.type === regle.type);
   const inconnue = !evaluateur;
+  const majParam = (cle, valeur) => setStructure(modifieParamRegle(structure, regle.id, cle, valeur));
+  const maj = (changement) => setStructure(modifieRegle(structure, regle.id, changement));
+  const supprimer = () => {
+    if (!confirm(`Supprimer la règle « ${regle.id} » ? Le moteur cessera de l’appliquer.`)) return;
+    setStructure(supprimeRegle(structure, regle.id));
+  };
 
   return (
     <div
@@ -2298,73 +2406,123 @@ function CarteRegle({ referentiel, regle, index, onChange }) {
             <code className="text-xs" style={{ fontFamily: F_MONO, color: 'var(--ink-soft)' }}>
               {regle.id}
             </code>
-            <span style={{ fontFamily: F_DISPLAY, fontWeight: 600, color: 'var(--ink)' }}>{regle.type}</span>
+            <span
+              style={{ fontFamily: F_DISPLAY, fontWeight: 600, color: 'var(--ink)' }}
+              title={regle.type}
+            >
+              {evaluateur?.libelle ?? regle.type}
+            </span>
             <Badge couleur={regle.dure ? CAT_CORAL : CAT_ARDOISE}>
               {regle.dure ? 'dure' : `souple · ${regle.poids ?? 'poids par défaut'}`}
             </Badge>
             {inconnue && <Badge couleur={CAT_CORAL}>type inconnu</Badge>}
           </div>
-          {regle.commentaire ? (
-            <p className="mt-1 text-sm" style={{ color: 'var(--ink)' }}>
-              {regle.commentaire}
-            </p>
-          ) : (
-            <p className="mt-1 text-sm" style={{ color: 'var(--crisis)' }}>
-              Sans commentaire — dans six mois, personne ne saura pourquoi cette règle existe.
+          {evaluateur && (
+            <p className="mt-1 text-sm" style={{ color: 'var(--ink-soft)' }}>
+              {evaluateur.resume}
             </p>
           )}
         </div>
 
         <label className="flex shrink-0 items-center gap-2 text-sm" style={{ color: 'var(--ink)' }}>
-          <input
-            type="checkbox"
-            checked={regle.actif}
-            onChange={() => onChange(index, { ...regle, actif: !regle.actif })}
-          />
+          <input type="checkbox" checked={regle.actif} onChange={() => maj({ actif: !regle.actif })} />
           active
         </label>
       </div>
 
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <div>
-          <Etiquette>Cibles</Etiquette>
-          <div className="mt-1 flex flex-wrap gap-1.5">
-            {Object.entries(regle.cibles ?? {}).flatMap(([cle, ids]) =>
-              (ids ?? []).map((id) => (
-                <Badge key={`${cle}-${id}`} couleur={CAT_INDIGO} titre={LIBELLES_CIBLES[cle] ?? cle}>
-                  {nomDeCible(referentiel, cle, id)}
-                </Badge>
-              )),
-            )}
-            {Object.values(regle.cibles ?? {}).every((v) => (v ?? []).length === 0) && (
-              <span className="text-sm" style={{ color: 'var(--ink-soft)' }}>
-                aucune
-              </span>
-            )}
-          </div>
-        </div>
-        <div>
-          <Etiquette>Paramètres</Etiquette>
+      <div className="mt-3">
+        <Champ
+          libelle="Commentaire"
+          aide={
+            regle.commentaire
+              ? undefined
+              : 'Sans commentaire, dans six mois personne ne saura pourquoi cette règle existe.'
+          }
+        >
+          <input
+            type="text"
+            className="w-full rounded-xl border px-3 py-2 text-sm"
+            style={{
+              ...styleSaisie,
+              borderColor: regle.commentaire ? 'var(--border)' : 'var(--crisis)',
+            }}
+            placeholder="Décision réunion du…"
+            value={regle.commentaire ?? ''}
+            onChange={(e) => maj({ commentaire: e.target.value })}
+          />
+        </Champ>
+      </div>
+
+      {inconnue ? (
+        // Un type que ce moteur ne connaît pas : aucun descripteur, donc aucun
+        // formulaire possible. Le JSON brut reste le seul rendu honnête — et il
+        // ne s'édite pas, sous peine de produire n'importe quoi.
+        <div className="mt-3">
+          <Etiquette>Cibles et paramètres (non modifiables)</Etiquette>
           <pre
             className="mt-1 overflow-x-auto rounded-lg border p-2 text-xs"
             style={{ fontFamily: F_MONO, borderColor: 'var(--border)', color: 'var(--ink)' }}
           >
-            {JSON.stringify(regle.params ?? {}, null, 1)}
+            {JSON.stringify({ cibles: regle.cibles ?? {}, params: regle.params ?? {} }, null, 1)}
           </pre>
         </div>
-      </div>
+      ) : (
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          {evaluateur.cibles.cles.map((cle) => (
+            <dl className="m-0" key={cle}>
+              <ListePersonnes
+                titre={LIBELLES_CIBLES[cle] ?? cle}
+                couleur={COULEUR_TABLE[cle] ?? CAT_ARDOISE}
+                ids={regle.cibles?.[cle] ?? []}
+                catalogue={catalogueDeTable(referentiel, cle)}
+                vide={{
+                  texte: catalogueDeTable(referentiel, cle).length === 0 ? 'rien à choisir' : 'à choisir',
+                  alerte: nombreDeCibles(regle) < evaluateur.cibles.minimum,
+                }}
+                titrePour={(id) => nomDeCible(referentiel, cle, id)}
+                editable
+                onRetirer={(id) =>
+                  maj({
+                    cibles: { ...regle.cibles, [cle]: (regle.cibles?.[cle] ?? []).filter((x) => x !== id) },
+                  })
+                }
+                onAjouter={(id) =>
+                  maj({ cibles: { ...regle.cibles, [cle]: [...(regle.cibles?.[cle] ?? []), id] } })
+                }
+              />
+            </dl>
+          ))}
+
+          {evaluateur.champs.map((champ) => (
+            <ChampParametre
+              key={champ.cle}
+              champ={champ}
+              valeur={regle.params?.[champ.cle]}
+              referentiel={referentiel}
+              onChange={(v) => majParam(champ.cle, v)}
+            />
+          ))}
+        </div>
+      )}
+
+      {evaluateur && evaluateur.cibles.cles.length > 1 && (
+        <p className="mt-2 text-xs" style={{ color: 'var(--ink-soft)' }}>
+          {evaluateur.cibles.cles.map((c) => LIBELLES_CIBLES[c] ?? c).join(' ou ')} — l’un
+          {evaluateur.cibles.minimum > 1 ? ` ou l’autre, ${evaluateur.cibles.minimum} au minimum` : ' ou l’autre suffit'}.
+        </p>
+      )}
 
       <div className="mt-3 flex flex-wrap items-end gap-3">
-        <div className="w-40">
+        <div className="w-56">
           <Champ libelle="Nature">
             <Selecteur
               valeur={regle.dure ? 'dure' : 'souple'}
-              onChange={(v) => {
-                const suite = { ...regle, dure: v === 'dure' };
-                if (suite.dure) delete suite.poids;
-                else if (suite.poids === undefined) suite.poids = 50;
-                onChange(index, suite);
-              }}
+              // `undefined` retire la clé côté moteur : une règle dure n'a pas
+              // de poids, et en garder un périmé induirait en erreur au
+              // prochain passage en souple.
+              onChange={(v) =>
+                maj({ dure: v === 'dure', poids: v === 'dure' ? undefined : (regle.poids ?? 50) })
+              }
               options={[
                 { valeur: 'dure', libelle: 'Dure — jamais violée' },
                 { valeur: 'souple', libelle: 'Souple — négociable' },
@@ -2381,20 +2539,29 @@ function CarteRegle({ referentiel, regle, index, onChange }) {
                 className="w-full rounded-xl border px-3 py-2 text-sm"
                 style={styleSaisie}
                 value={regle.poids ?? 50}
-                onChange={(e) => onChange(index, { ...regle, poids: Number(e.target.value) })}
+                onChange={(e) => maj({ poids: Number(e.target.value) })}
               />
             </Champ>
           </div>
         )}
+        <div className="ml-auto">
+          <Bouton variante="danger" icone={Trash2} onClick={supprimer}>
+            Supprimer
+          </Bouton>
+        </div>
       </div>
     </div>
   );
 }
 
+/** Nombre de cibles d'une règle, toutes clés confondues. */
+function nombreDeCibles(regle) {
+  return Object.values(regle.cibles ?? {}).reduce((n, ids) => n + (ids ?? []).length, 0);
+}
+
 function EcranRegles({ referentiel, structure, setStructure, validation }) {
   const regles = structure.regles;
-  const majRegle = (index, valeur) =>
-    setStructure({ ...structure, regles: regles.map((r, i) => (i === index ? valeur : r)) });
+  const [typeNeuf, setTypeNeuf] = useState(catalogue()[0]?.type ?? '');
 
   const problemesDeRegles = (validation?.problemes ?? []).filter((p) => p.chemin.startsWith('/regles'));
 
@@ -2405,10 +2572,41 @@ function EcranRegles({ referentiel, structure, setStructure, validation }) {
         sousTitre={`${regles.filter((r) => r.actif).length} active(s) · ${regles.filter((r) => r.dure).length} dure(s)`}
       >
         <Bandeau ton="info" icone={Info} titre="Ce que cet écran modifie">
-          Activation, nature (dure / souple) et poids — ce qui se rediscute en réunion. Les cibles et les
-          paramètres se modifient dans le fichier : ils engagent la sémantique de la règle, pas son arbitrage.
-          Toute modification doit être exportée pour être conservée.
+          Tout : créer, supprimer, changer les cibles, les paramètres, la nature et le poids. Les formulaires
+          sont bâtis d’après ce que le moteur déclare attendre pour chaque type — ce n’est pas cet écran qui
+          sait ce qu’une règle contient. <strong>Toute modification doit être exportée pour être conservée.</strong>
         </Bandeau>
+      </Carte>
+
+      <Carte
+        titre="Nouvelle règle"
+        sousTitre="Ajouter un type demande du code ; ajouter une règle, non."
+      >
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="min-w-64 flex-1">
+            <Champ
+              libelle="Type"
+              aide={catalogue().find((e) => e.type === typeNeuf)?.resume}
+            >
+              <Selecteur
+                valeur={typeNeuf}
+                onChange={setTypeNeuf}
+                options={catalogue().map((e) => ({ valeur: e.type, libelle: e.libelle }))}
+              />
+            </Champ>
+          </div>
+          <Bouton
+            variante="primaire"
+            icone={Plus}
+            onClick={() => setStructure(ajouteRegle(structure, { type: typeNeuf }))}
+          >
+            Créer
+          </Bouton>
+        </div>
+        <p className="mt-2 text-xs" style={{ color: 'var(--ink-soft)' }}>
+          Elle arrive sans cible et sera signalée incomplète : c’est voulu, une règle sans cible ne
+          contraint rien et le dire tout de suite vaut mieux que de la laisser dormir.
+        </p>
       </Carte>
 
       {problemesDeRegles.length > 0 && (
@@ -2418,20 +2616,17 @@ function EcranRegles({ referentiel, structure, setStructure, validation }) {
       )}
 
       <div className="space-y-3">
-        {regles.map((r, i) => (
-          <CarteRegle key={r.id} referentiel={referentiel} regle={r} index={i} onChange={majRegle} />
+        {regles.length === 0 && <Vide>Aucune règle. Le moteur ne vérifie alors que l’encadrement.</Vide>}
+        {regles.map((r) => (
+          <CarteRegle
+            key={r.id}
+            referentiel={referentiel}
+            regle={r}
+            structure={structure}
+            setStructure={setStructure}
+          />
         ))}
       </div>
-
-      <Carte titre="Types disponibles" sousTitre="Ajouter un type demande du code ; ajouter une règle, non.">
-        <div className="flex flex-wrap gap-1.5">
-          {catalogue().map((e) => (
-            <Badge key={e.type} couleur={e.dureParDefaut ? CAT_CORAL : CAT_ARDOISE} titre={e.dureParDefaut ? 'dure par défaut' : 'souple par défaut'}>
-              {e.type}
-            </Badge>
-          ))}
-        </div>
-      </Carte>
     </div>
   );
 }

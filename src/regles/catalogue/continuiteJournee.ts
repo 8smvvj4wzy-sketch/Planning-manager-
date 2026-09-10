@@ -21,6 +21,7 @@ import { educateursSelonPorte } from '../../affectations.ts';
 import type { Creneau } from '../../planning/planning.ts';
 import type { PorteRegle } from '../../types.ts';
 import {
+  champPorte,
   chemin,
   exigeCibles,
   exigeNombre,
@@ -46,6 +47,27 @@ function empreinte(creneau: Creneau, sur: Dimension, jeuneId: string, porte: Por
 export const continuiteJournee: EvaluateurRegle = {
   type: 'continuite_journee',
   dureParDefaut: false,
+  libelle: 'Continuité de la journée',
+  resume: 'Limite le nombre de ruptures que ce jeune subit dans sa journée.',
+  cibles: { cles: ['jeunes'], minimum: 1 },
+  champs: [
+    {
+      cle: 'maxChangements',
+      libelle: 'Changements tolérés',
+      forme: 'nombre',
+      min: 0,
+      defaut: 2,
+      obligatoire: true,
+    },
+    {
+      cle: 'sur',
+      libelle: 'Ruptures comptées sur',
+      forme: 'choix',
+      options: ['educateurs', 'salle', 'activite'],
+      defaut: 'educateurs',
+    },
+    champPorte('binome'),
+  ],
 
   valide(regle: Regle, ref: Referentiel): Probleme[] {
     const problemes = [

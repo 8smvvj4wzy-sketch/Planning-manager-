@@ -27,6 +27,25 @@ import {
 export const quotaDetachement: EvaluateurRegle = {
   type: 'quota_detachement',
   dureParDefaut: true,
+  libelle: 'Quota de détachement',
+  resume: 'Cet éducateur ne doit pas être détaché au-delà de ce volume.',
+  cibles: { cles: ['educateurs'], minimum: 1 },
+  champs: [
+    {
+      cle: 'maxPasParJour',
+      libelle: 'Maximum par jour',
+      forme: 'nombre',
+      min: 0,
+      aide: 'En pas de grille. Laisser vide pour ne pas limiter la journée.',
+    },
+    {
+      cle: 'maxPasParSemaine',
+      libelle: 'Maximum par semaine',
+      forme: 'nombre',
+      min: 0,
+      aide: 'En pas de grille. Sans l’un ni l’autre, la règle ne contraint rien — la validation le signale.',
+    },
+  ],
 
   valide(regle: Regle, ref: Referentiel): Probleme[] {
     const problemes = [

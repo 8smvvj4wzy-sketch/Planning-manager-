@@ -812,3 +812,69 @@ créneaux où la personne apparaît réellement (`src/import/assemblage.ts`).
 Le test qui verrouille ça ne se contente pas de `valideStructure` : une structure peut être
 parfaitement valide et invisible au moteur, c'était précisément le cas. Il vérifie le bout
 de la chaîne — `educateursRequis > 0` et l'éducateur `mobilisable`.
+
+## 25. Les règles éditables, sans que l'interface sache ce qu'est une règle
+
+L'écran Règles n'éditait que `actif`, `dure` et `poids`. Les cibles étaient des badges, les
+`params` un `<pre>` JSON, et on ne pouvait ni créer ni supprimer une règle. Le README
+annonçait pourtant qu'on y réglait la portée : c'était faux, `porte` n'était modifiable
+nulle part.
+
+**Le problème n'est pas de dessiner un formulaire, c'est de savoir quoi y mettre.** Ce
+qu'un type de règle attend n'existait qu'à l'état impératif, dans le corps de `valide()`.
+L'interface ne peut pas le déduire d'une fonction, et le lui réécrire en dur aurait créé
+la seconde source de vérité que l'architecture de ce dépôt refuse : douze formulaires dans
+le JSX, douze `valide()` dans le moteur, et la certitude qu'ils divergeraient.
+
+`EvaluateurRegle` porte donc deux descripteurs déclaratifs, **dans le même fichier que
+l'évaluateur** :
+
+- `cibles: { cles, minimum }` — plusieurs clés veulent dire « l'une **ou** l'autre » :
+  `taux_encadrement` accepte des groupes ou des activités ;
+- `champs: ChampRegle[]` — cinq formes suffisent aux douze types (`nombre`, `ids`,
+  `choix`, `heure`, `texte`), chacune avec son libellé, son aide, son défaut et son
+  caractère obligatoire.
+
+Un seul endroit par type, qui ne peut pas dériver de son voisin. Le JSX ne connaît plus
+aucune règle : il connaît cinq formes. Ajouter un type de règle ne le touche pas ; ajouter
+une *forme* le toucherait, et c'est le seul cas.
+
+### Le test fait le travail que la relecture ne fait pas
+
+Un descripteur peut mentir sur son évaluateur. `test/descripteurs.test.ts` les tient
+synchronisés en parcourant le catalogue, **dans les deux sens** :
+
+- une règle bâtie depuis le descripteur passe `valide()` sans erreur ;
+- retirer un champ déclaré **obligatoire** la fait échouer — sinon le descripteur
+  sur-déclare, et le formulaire réclame l'inutile ;
+- retirer un champ déclaré **facultatif** ne la fait *pas* échouer — sinon il sous-déclare,
+  et le formulaire laisse produire une règle que la validation refusera. C'est le pire des
+  deux sens, et c'est celui qu'on oublie de tester.
+
+J'ai vérifié que ce test mord en corrompant un descripteur dans chaque sens.
+
+### Le trou que ce test ne voyait pas
+
+Un paramètre **facultatif** que `evalue()` lit mais que le descripteur ne déclare pas passe
+tout : `valide()` ne l'exige pas, donc « accepte une règle sans lui » reste vert — et
+l'interface ne l'expose jamais. Le paramètre existe, fonctionne, et reste inatteignable.
+
+C'est arrivé à `fenetre` (`rotation_educateur`), trouvé à la main en comparant les clés
+lues par le code aux clés déclarées. Un dernier contrôle lit maintenant les sources du
+catalogue et refait cette comparaison. **C'est un grep**, avec ce que ça vaut : il ne
+verrait pas une clé construite dynamiquement. Aucune ne l'est, et c'est le seul filet
+contre cette dérive.
+
+### `undefined` retire une clé, il ne la pose pas
+
+`modifieRegle` et `modifieParamRegle` traitent une valeur `undefined` comme un retrait.
+Ce n'est pas ce que fait un spread : `{ ...regle, poids: undefined }` **garde** la clé.
+`JSON.stringify` la laisserait tomber à l'export, mais la validation en mémoire verrait un
+`poids` présent et non numérique — un fichier refusé juste après un geste anodin. Passer
+une règle de souple à dure passe exactement par là.
+
+### Ce qui reste hors d'atteinte
+
+Une règle d'un type **inconnu** de ce moteur n'a pas de descripteur, donc pas de formulaire
+possible. Sa carte affiche le JSON brut, en lecture seule. Éditer à l'aveugle quelque chose
+que rien n'évaluera serait pire que de ne pas l'éditer.
