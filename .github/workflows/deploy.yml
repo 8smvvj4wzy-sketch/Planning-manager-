@@ -9,8 +9,14 @@ permissions:
   pages: write
   id-token: write
 
+# Un groupe PAR BRANCHE, pas un groupe global. Avec `group: pages`, n'importe
+# quel push annulait le run en cours de n'importe quelle autre branche : merger
+# sur main tuait le vérificateur d'une branche de travail, qui ressortait
+# « cancelled » — ni vert ni rouge, et illisible. La propriété dont Pages a
+# besoin est que les déploiements de main ne se doublent pas entre eux ; elle
+# est conservée, puisque les runs de main partagent la même `github.ref`.
 concurrency:
-  group: pages
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
