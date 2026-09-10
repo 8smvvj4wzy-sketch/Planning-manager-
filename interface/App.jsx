@@ -45,6 +45,9 @@ import {
   Referentiel,
   ajouteSalle,
   assemble,
+  bornesDuJour,
+  couloirsDuJour,
+  educateursAupresDe,
   auditeJourNominal,
   calculDisponibilite,
   catalogue,
@@ -58,11 +61,13 @@ import {
   estEnveloppeChiffree,
   etatJourNominal,
   jeunesSansAffectation,
+  journeeDe,
   litPlanning,
   modifieCreneau,
   modifieSalle,
   nomsRencontres,
   optionsAvec,
+  plagesDePas,
   planningTypeDuJour,
   proposeCorrespondances,
   reparePeriode,
@@ -494,173 +499,389 @@ function NavigationLaterale({ destination, setDestination, replie, setReplie, th
 }
 
 /* ==================== Grille ====================
-   Lignes = pas de la grille, colonnes = salles, éducateurs ou jeunes selon
-   l'axe choisi. Un créneau occupe `span pas` lignes ; une case vide sur l'axe
-   « salles » est une salle libre — la vue « salles libres » de la
-   spécification ne demande donc aucun écran à part, c'est cette grille lue à
-   l'envers. */
+   Le temps à gauche, et en face les activités côte à côte : la forme d'un
+   planning d'IME tel qu'il s'écrit vraiment, et celle du document fourni par
+   l'établissement.
 
-const AXES = [
+   Deux choix commandent le reste :
+
+   - **Les colonnes ne sont pas des personnes.** Une colonne par jeune découpait
+     une même activité en autant de blocs qu'elle avait d'enfants, et personne
+     ne lit un planning comme ça. Ce sont des COULOIRS d'activités simultanées
+     (`couloirsDuJour`, src/vues.ts) : trois ou quatre colonnes au lieu de
+     quinze. Le sort d'une personne en particulier se lit dans sa fiche.
+   - **L'axe est en minutes, pas en pas.** Une ligne par pas donnait 78 lignes
+     de 34 px pour une journée au pas de 5 minutes, là où le document d'origine
+     en porte treize. Seules les bornes réelles portent une étiquette, et chaque
+     bande est haute au prorata de sa durée — avec un plancher, sinon un créneau
+     de cinq minutes serait illisible. */
+
+const AFFICHAGES = [
+  { valeur: 'activite', libelle: 'par activité' },
   { valeur: 'salle', libelle: 'par salle' },
-  { valeur: 'educateur', libelle: 'par éducateur' },
-  { valeur: 'jeune', libelle: 'par jeune' },
+  { valeur: 'jeune', libelle: 'fiche d’un jeune' },
+  { valeur: 'educateur', libelle: 'fiche d’un éducateur' },
 ];
 
-function colonnesDe(ref, axe) {
-  if (axe === 'educateur') {
-    return ref.structure.educateurs
-      .filter((e) => e.actif)
-      .map((e) => ({ id: e.id, nom: ref.libelleEducateur(e.id), sousTitre: e.statut }));
-  }
-  if (axe === 'jeune') {
-    return ref.structure.jeunes
-      .filter((j) => j.actif)
-      .map((j) => ({ id: j.id, nom: j.initiales, sousTitre: ref.groupes.get(j.groupeId)?.nom ?? '—' }));
-  }
-  return ref.structure.salles.map((s) => ({ id: s.id, nom: s.nom, sousTitre: `${s.capacite} places` }));
+const estFiche = (affichage) => affichage === 'jeune' || affichage === 'educateur';
+
+/* Hauteur d'une bande : proportionnelle à sa durée, jamais sous le plancher —
+   ET jamais sous ce que son contenu réclame.
+
+   Le prorata seul ne suffit pas : une heure d'accueil collectif à cinq paires
+   demande plus de place qu'une heure de repas, et la rogner tronque des noms.
+   Un tableur fait pareil, il grandit ses lignes selon ce qu'elles portent. */
+const PIXELS_PAR_MINUTE = 0.9;
+const HAUTEUR_MIN_BANDE = 30;
+const HAUTEUR_TITRE = 20;
+const HAUTEUR_LIGNE = 15;
+const HAUTEUR_SALLE = 13;
+
+function hauteurNecessaire(nbLignes, avecSalle) {
+  return 10 + HAUTEUR_TITRE + nbLignes * HAUTEUR_LIGNE + (avecSalle ? HAUTEUR_SALLE : 0);
 }
 
-function colonnesDuCreneau(creneau, axe) {
-  if (axe === 'educateur') return creneau.educateurs;
-  if (axe === 'jeune') return creneau.jeunes;
-  return creneau.salleId ? [creneau.salleId] : [];
+/**
+ * `besoins` : ce que chaque créneau réclame — `{ pasDebut, pasFin, hauteur }`.
+ * Un créneau qui déborde de la place que lui laissent ses bandes fait grandir
+ * la DERNIÈRE d'entre elles : les créneaux qui commencent plus tard descendent
+ * avec, et rien ne se recouvre.
+ */
+function bandesDeTemps(bornes, grille, besoins = []) {
+  const hauteurs = [];
+  for (let i = 0; i < bornes.length - 1; i++) {
+    const minutes = (bornes[i + 1] - bornes[i]) * grille.pasMinutes;
+    hauteurs.push(Math.max(HAUTEUR_MIN_BANDE, Math.round(minutes * PIXELS_PAR_MINUTE)));
+  }
+
+  const couvertes = (pasDebut, pasFin) => {
+    const premiere = bornes.findIndex((b, i) => i < hauteurs.length && b <= pasDebut && pasDebut < bornes[i + 1]);
+    let derniere = premiere;
+    while (derniere + 1 < hauteurs.length && bornes[derniere + 1] < pasFin) derniere++;
+    return { premiere, derniere };
+  };
+
+  // Du plus court au plus long : un créneau court impose sa hauteur d'abord,
+  // et celui qui l'englobe en profite au lieu de la lui reprendre.
+  for (const besoin of [...besoins].sort((a, b) => a.pasFin - a.pasDebut - (b.pasFin - b.pasDebut))) {
+    const { premiere, derniere } = couvertes(besoin.pasDebut, besoin.pasFin);
+    if (premiere < 0) continue;
+    let disponible = 0;
+    for (let i = premiere; i <= derniere; i++) disponible += hauteurs[i];
+    if (disponible < besoin.hauteur) hauteurs[derniere] += besoin.hauteur - disponible;
+  }
+
+  const bandes = [];
+  let haut = 0;
+  for (let i = 0; i < hauteurs.length; i++) {
+    bandes.push({ debut: bornes[i], fin: bornes[i + 1], haut, hauteur: hauteurs[i] });
+    haut += hauteurs[i];
+  }
+  return { bandes, hauteur: haut };
 }
 
-const HAUTEUR_PAS = 34;
+/* Position verticale d'un créneau sur cet axe non linéaire : il faut cumuler
+   les bandes, une règle graduée ne suffirait pas. */
+function placeSurLAxe(bandes, pasDebut, pasFin) {
+  const premiere = bandes.find((b) => b.debut <= pasDebut && pasDebut < b.fin) ?? bandes[0];
+  const derniere =
+    [...bandes].reverse().find((b) => b.debut < pasFin && pasFin <= b.fin) ?? bandes[bandes.length - 1];
+  if (!premiere || !derniere) return { haut: 0, hauteur: HAUTEUR_MIN_BANDE };
+  return { haut: premiere.haut, hauteur: derniere.haut + derniere.hauteur - premiere.haut };
+}
 
-function Grille({ referentiel, planning, axe, signalements, onCreneau }) {
-  const colonnes = colonnesDe(referentiel, axe);
-  const nbPas = referentiel.grille.nbPas;
+/* « Héléna + Valentin / Camille + Callista » — les jeunes qui partagent les
+   mêmes accompagnants tiennent sur une ligne, comme dans le document. Sans ce
+   regroupement, une activité collective à cinq enfants ferait cinq lignes
+   presque identiques. L'ordre de première apparition est conservé. */
+function pairesDuCreneau(referentiel, creneau) {
+  const groupes = new Map();
+  for (const jeuneId of creneau.jeunes) {
+    const educateurs = educateursAupresDe(creneau, jeuneId);
+    const cle = educateurs.join(' ');
+    const groupe = groupes.get(cle);
+    if (groupe) groupe.jeunes.push(jeuneId);
+    else groupes.set(cle, { jeunes: [jeuneId], educateurs });
+  }
+  return [...groupes.values()].map((g) => ({
+    jeunes: g.jeunes.map((id) => referentiel.libelleJeune(id)).join(' + '),
+    educateurs: g.educateurs.map((id) => referentiel.libelleEducateur(id)).join(' + '),
+  }));
+}
 
-  /* Un axe sans colonne ne dessine rien — et une grille vide se lit comme une
-     application cassée. Un planning importé d'un tableur n'a aucune salle :
-     l'axe « par salle » y était muet, sans jamais dire pourquoi. */
+/* Lignes qu'un créneau sans binôme nommé occupe quand même : ses éducateurs,
+   ou rien du tout pour un repas collectif. */
+const creneau0Lignes = (creneau) => (creneau.educateurs.length > 0 ? 1 : 0);
+
+function contourDuSignal(signal) {
+  if (signal?.conflit) return '0 0 0 3px var(--crisis)';
+  if (signal?.dur) return '0 0 0 2px var(--crisis)';
+  if (signal?.souple) return '0 0 0 2px var(--ink-soft)';
+  return 'none';
+}
+
+/* Le contenu d'un bloc : le nom de l'activité, puis les paires. */
+function BlocCreneau({ referentiel, creneau, signal, onCreneau, montreSalle }) {
+  const couleur = couleurActivite(referentiel, creneau.activiteId);
+  const encre = texteLisibleSur(couleur);
+  const nom = referentiel.activite(creneau.activiteId)?.nom ?? creneau.activiteId;
+  const paires = pairesDuCreneau(referentiel, creneau);
+  const salle = creneau.salleId ? (referentiel.salle(creneau.salleId)?.nom ?? creneau.salleId) : null;
+
+  return (
+    <button
+      type="button"
+      onClick={() => onCreneau?.(creneau.id)}
+      className="absolute inset-x-[3px] overflow-hidden rounded-lg px-2 py-1 text-left"
+      style={{ background: couleur, color: encre, boxShadow: contourDuSignal(signal) }}
+      title={`${nom} — ${referentiel.grille.heureDePas(creneau.pasDebut)} à ${referentiel.grille.heureDePas(creneau.pasDebut + creneau.pas)}`}
+    >
+      <span className="flex items-center gap-1 text-xs" style={{ fontWeight: 600 }}>
+        {(creneau.verrouille || creneau.epingle) && <Pin size={11} className="shrink-0" aria-label="Créneau figé" />}
+        <span className="truncate">{nom}</span>
+      </span>
+      {/* Une activité collective sans binôme nommé — un repas, une pause — ne
+          porte volontairement personne. Écrire « — personne » en travers de
+          chaque cellule de ce genre ne signale rien et encombre tout. */}
+      {paires.length === 0 ? (
+        creneau.educateurs.length > 0 && (
+          <span className="block truncate text-[11px]" style={{ opacity: 0.85, fontFamily: F_MONO }}>
+            {creneau.educateurs.map((e) => referentiel.libelleEducateur(e)).join(', ')}
+          </span>
+        )
+      ) : (
+        paires.map((p, i) => (
+          <span key={i} className="block truncate text-[11px]" style={{ opacity: 0.9, fontFamily: F_MONO }}>
+            {p.jeunes} / {p.educateurs || '—'}
+          </span>
+        ))
+      )}
+      {montreSalle && salle && (
+        <span className="block truncate text-[10px]" style={{ opacity: 0.75 }}>
+          {salle}
+        </span>
+      )}
+    </button>
+  );
+}
+
+/* Colonnes de la grille. « par activité » range les créneaux en couloirs ;
+   « par salle » garde une colonne par salle, plus une colonne « sans salle »
+   quand il en reste à placer — c'est là qu'on voit ce qui reste à faire. */
+function colonnesEtPlacement(referentiel, planning, affichage) {
+  if (affichage === 'salle') {
+    const orphelins = planning.creneaux.filter((c) => !c.salleId);
+    const colonnes = referentiel.structure.salles.map((s) => ({
+      id: s.id,
+      nom: s.nom,
+      sousTitre: `${s.capacite} places`,
+    }));
+    if (orphelins.length > 0) {
+      colonnes.unshift({ id: ' sans-salle', nom: 'Sans salle', sousTitre: `${orphelins.length} à placer` });
+    }
+    const placement = new Map();
+    for (const creneau of planning.creneaux) {
+      const index = colonnes.findIndex((c) => c.id === (creneau.salleId ?? ' sans-salle'));
+      if (index >= 0) placement.set(creneau.id, index);
+    }
+    return { colonnes, placement };
+  }
+
+  const { parCreneau, nombre } = couloirsDuJour(planning);
+  return {
+    colonnes: Array.from({ length: nombre }, (_, i) => ({ id: `couloir-${i}`, nom: '', sousTitre: '' })),
+    placement: parCreneau,
+  };
+}
+
+function Grille({ referentiel, planning, affichage, signalements, onCreneau }) {
+  const grille = referentiel.grille;
+  const { colonnes, placement } = colonnesEtPlacement(referentiel, planning, affichage);
+
+  /* Les bornes viennent des créneaux : sans créneau il n'y a pas d'axe, et une
+     grille vide se lit comme une application cassée. */
+  const bornes = bornesDuJour(planning);
+  if (bornes.length < 2) {
+    return <Vide>Aucun créneau ce jour-là.</Vide>;
+  }
   if (colonnes.length === 0) {
-    const quoi = axe === 'salle' ? 'salle' : axe === 'educateur' ? 'éducateur actif' : 'jeune actif';
     return (
       <Vide>
-        Aucun{axe === 'salle' ? 'e' : ''} {quoi} dans cette structure : il n’y a rien à afficher sur cet axe.
-        {axe === 'salle' && ' Un planning importé depuis un tableur n’en nomme généralement pas — choisissez un autre axe, ou ajoutez les salles dans l’écran Structure.'}
+        Aucune salle dans cette structure : il n’y a rien à afficher sur cet axe. Un planning importé depuis un
+        tableur n’en nomme généralement pas — ajoutez-les dans l’écran Structure, ou revenez à l’affichage par
+        activité.
       </Vide>
     );
   }
 
-  const blocs = [];
-  for (const creneau of planning.creneaux) {
-    const cols = colonnesDuCreneau(creneau, axe);
-    for (const colId of cols) {
-      const index = colonnes.findIndex((c) => c.id === colId);
-      if (index < 0) continue;
-      blocs.push({ creneau, colonne: index });
-    }
-  }
+  const montreSalle = affichage !== 'salle';
+  const besoins = planning.creneaux.map((c) => {
+    const paires = pairesDuCreneau(referentiel, c);
+    const lignes = paires.length > 0 ? paires.length : creneau0Lignes(c);
+    return {
+      pasDebut: c.pasDebut,
+      pasFin: c.pasDebut + c.pas,
+      hauteur: hauteurNecessaire(lignes, montreSalle && Boolean(c.salleId)),
+    };
+  });
+
+  const { bandes, hauteur } = bandesDeTemps(bornes, grille, besoins);
+  const montreEnTetes = colonnes.some((c) => c.nom !== '');
+  const hauteurEnTete = montreEnTetes ? 49 : 0;
 
   return (
     <div className="overflow-x-auto">
-      <div
-        className="grid min-w-max"
-        style={{
-          gridTemplateColumns: `64px repeat(${colonnes.length}, minmax(132px, 1fr))`,
-          gridTemplateRows: `auto repeat(${nbPas}, ${HAUTEUR_PAS}px)`,
-        }}
-      >
-        {/* En-tête */}
-        <div
-          className="sticky left-0 z-20 border-b border-r px-2 py-2"
-          style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
-        />
-        {colonnes.map((c) => (
-          <div
-            key={c.id}
-            className="border-b border-r px-2 py-2"
-            style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
-          >
-            <div className="truncate text-sm" style={{ color: 'var(--ink)', fontWeight: 600 }} title={c.nom}>
-              {c.nom}
-            </div>
-            <div className="truncate text-xs" style={{ color: 'var(--ink-soft)' }}>
-              {c.sousTitre}
-            </div>
-          </div>
-        ))}
-
-        {/* Fond : heures et cases */}
-        {Array.from({ length: nbPas }, (_, p) => {
-          const pause = referentiel.grille.estPause(p);
-          return (
-            <React.Fragment key={`ligne-${p}`}>
+      <div className="flex min-w-max">
+        {/* Axe des heures : seulement les bornes réelles */}
+        <div className="sticky left-0 z-10 w-16 shrink-0" style={{ background: 'var(--card)' }}>
+          {montreEnTetes && (
+            <div className="border-b" style={{ borderColor: 'var(--border)', height: hauteurEnTete }} />
+          )}
+          <div className="relative" style={{ height: hauteur }}>
+            {bandes.map((b) => (
               <div
-                className="sticky left-0 z-10 border-b border-r px-2 text-[11px]"
+                key={b.debut}
+                className="absolute inset-x-0 border-b border-r px-2 text-[11px]"
                 style={{
-                  gridColumn: 1,
-                  gridRow: p + 2,
-                  background: 'var(--card)',
+                  top: b.haut,
+                  height: b.hauteur,
                   borderColor: 'var(--border)',
                   color: 'var(--ink-soft)',
                   fontFamily: F_MONO,
                 }}
               >
-                {referentiel.grille.heureDePas(p)}
+                {grille.heureDePas(b.debut)}
               </div>
-              {colonnes.map((c, i) => (
+            ))}
+          </div>
+        </div>
+
+        {/* Une colonne par couloir (ou par salle) */}
+        {colonnes.map((colonne, i) => (
+          <div key={colonne.id} className="min-w-[172px] flex-1 shrink-0">
+            {montreEnTetes && (
+              <div
+                className="border-b border-r px-2 py-2"
+                style={{ borderColor: 'var(--border)', height: hauteurEnTete }}
+              >
+                <div className="truncate text-sm" style={{ color: 'var(--ink)', fontWeight: 600 }} title={colonne.nom}>
+                  {colonne.nom}
+                </div>
+                <div className="truncate text-xs" style={{ color: 'var(--ink-soft)' }}>
+                  {colonne.sousTitre}
+                </div>
+              </div>
+            )}
+            <div className="relative border-r" style={{ height: hauteur, borderColor: 'var(--border)' }}>
+              {bandes.map((b) => (
                 <div
-                  key={`case-${p}-${c.id}`}
-                  className="border-b border-r"
+                  key={b.debut}
+                  className="absolute inset-x-0 border-b"
                   style={{
-                    gridColumn: i + 2,
-                    gridRow: p + 2,
+                    top: b.haut,
+                    height: b.hauteur,
                     borderColor: 'var(--border)',
-                    background: pause ? 'var(--nav-bg)' : 'transparent',
+                    background: grille.estPause(b.debut) ? 'var(--nav-bg)' : 'transparent',
                   }}
                 />
               ))}
-            </React.Fragment>
-          );
-        })}
-
-        {/* Créneaux */}
-        {blocs.map(({ creneau, colonne }) => {
-          const couleur = couleurActivite(referentiel, creneau.activiteId);
-          const signal = signalements?.get(creneau.id);
-          const encre = texteLisibleSur(couleur);
-          return (
-            <button
-              type="button"
-              key={`${creneau.id}-${colonne}`}
-              onClick={() => onCreneau?.(creneau.id)}
-              className="m-[2px] overflow-hidden rounded-lg px-2 py-1 text-left"
-              style={{
-                gridColumn: colonne + 2,
-                gridRow: `${creneau.pasDebut + 2} / span ${creneau.pas}`,
-                background: couleur,
-                color: encre,
-                boxShadow: signal?.conflit
-                  ? '0 0 0 3px var(--crisis)'
-                  : signal?.dur
-                    ? '0 0 0 2px var(--crisis)'
-                    : signal?.souple
-                      ? '0 0 0 2px var(--ink-soft)'
-                      : 'none',
-              }}
-              title={`${referentiel.activite(creneau.activiteId)?.nom ?? creneau.activiteId} — ${referentiel.grille.heureDePas(creneau.pasDebut)}`}
-            >
-              <span className="flex items-center gap-1 truncate text-xs" style={{ fontWeight: 600 }}>
-                {(creneau.verrouille || creneau.epingle) && (
-                  <Pin size={11} className="shrink-0" aria-label="Créneau figé" />
-                )}
-                <span className="truncate">
-                  {referentiel.activite(creneau.activiteId)?.nom ?? creneau.activiteId}
-                </span>
-              </span>
-              <span className="block truncate text-[11px]" style={{ opacity: 0.85, fontFamily: F_MONO }}>
-                {axe === 'jeune'
-                  ? creneau.educateurs.map((e) => referentiel.libelleEducateur(e)).join(', ') || '— sans éducateur'
-                  : creneau.jeunes.map((j) => referentiel.libelleJeune(j)).join(', ') || '— sans jeune'}
-              </span>
-            </button>
-          );
-        })}
+              {planning.creneaux
+                .filter((c) => placement.get(c.id) === i)
+                .map((creneau) => {
+                  const place = placeSurLAxe(bandes, creneau.pasDebut, creneau.pasDebut + creneau.pas);
+                  return (
+                    <div
+                      key={creneau.id}
+                      className="absolute inset-x-0"
+                      style={{ top: place.haut + 2, height: Math.max(24, place.hauteur - 4) }}
+                    >
+                      <BlocCreneau
+                        referentiel={referentiel}
+                        creneau={creneau}
+                        signal={signalements?.get(creneau.id)}
+                        onCreneau={onCreneau}
+                        montreSalle={affichage !== 'salle'}
+                      />
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        ))}
       </div>
+    </div>
+  );
+}
+
+/* ==================== Fiche d'une personne ====================
+   « Juste le planning d'un jeune avec les différents éducateurs qu'il va
+   avoir, et inversement pour les éducateurs. » Une liste chronologique, pas
+   une grille : on suit une journée, on ne compare pas des colonnes. */
+
+function Fiche({ referentiel, planning, type, personneId, signalements, onCreneau }) {
+  if (!personneId) return <Vide>Choisissez qui vous voulez suivre.</Vide>;
+
+  const lignes = journeeDe(planning, { type, id: personneId });
+  if (lignes.length === 0) {
+    return <Vide>Aucun créneau ce jour-là pour cette personne.</Vide>;
+  }
+
+  const libelleEnFace = (id) =>
+    type === 'jeune' ? referentiel.libelleEducateur(id) : referentiel.libelleJeune(id);
+
+  return (
+    <div className="space-y-1.5">
+      {lignes.map((ligne, i) => {
+        if (ligne.type === 'trou') {
+          return (
+            <div
+              key={`trou-${i}`}
+              className="flex items-center gap-3 rounded-lg border border-dashed px-3 py-1.5 text-sm"
+              style={{ borderColor: 'var(--border)', color: 'var(--ink-soft)' }}
+            >
+              <span style={{ fontFamily: F_MONO }}>
+                {referentiel.grille.heureDePas(ligne.pasDebut)} –{' '}
+                {referentiel.grille.heureDePas(ligne.pasDebut + ligne.pas)}
+              </span>
+              <span>sans activité</span>
+            </div>
+          );
+        }
+
+        const creneau = ligne.creneau;
+        const signal = signalements?.get(creneau.id);
+        const salle = creneau.salleId ? (referentiel.salle(creneau.salleId)?.nom ?? creneau.salleId) : null;
+        return (
+          <button
+            key={creneau.id}
+            type="button"
+            onClick={() => onCreneau?.(creneau.id)}
+            className="flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left text-sm"
+            style={{ borderColor: signal?.conflit || signal?.dur ? 'var(--crisis)' : 'var(--border)' }}
+          >
+            <span className="shrink-0" style={{ fontFamily: F_MONO, color: 'var(--ink-soft)' }}>
+              {referentiel.grille.heureDePas(creneau.pasDebut)} –{' '}
+              {referentiel.grille.heureDePas(creneau.pasDebut + creneau.pas)}
+            </span>
+            <span
+              className="h-3 w-3 shrink-0 rounded-full"
+              style={{ background: couleurActivite(referentiel, creneau.activiteId) }}
+              aria-hidden="true"
+            />
+            <span className="min-w-0 flex-1 truncate" style={{ color: 'var(--ink)', fontWeight: 600 }}>
+              {referentiel.activite(creneau.activiteId)?.nom ?? creneau.activiteId}
+            </span>
+            <span className="min-w-0 flex-1 truncate" style={{ color: 'var(--ink)' }}>
+              {ligne.enFace.length > 0 ? ligne.enFace.map(libelleEnFace).join(', ') : '— personne en face'}
+            </span>
+            {salle && (
+              <span className="shrink-0 text-xs" style={{ color: 'var(--ink-soft)' }}>
+                {salle}
+              </span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -979,6 +1200,8 @@ function EcranPlanning({
   setCreneauOuvert,
   validation,
   onProbleme,
+  personneSuivie,
+  setPersonneSuivie,
 }) {
 
   /* Deux plannings possibles : le planning type d'un jour de la semaine (la
@@ -1034,6 +1257,29 @@ function EcranPlanning({
 
   const joursDeLaGrille = referentiel.structure.grille.jours;
 
+  /* Qui l'on peut suivre dans une fiche. La liste change avec la vue : suivre
+     un éducateur dans la fiche d'un jeune n'aurait pas de sens. */
+  const personnesSuivables = useMemo(() => {
+    if (!estFiche(axe)) return [];
+    return axe === 'jeune'
+      ? referentiel.structure.jeunes
+          .filter((j) => j.actif)
+          .map((j) => ({ valeur: j.id, libelle: referentiel.libelleJeune(j.id) }))
+      : referentiel.structure.educateurs
+          .filter((e) => e.actif)
+          .map((e) => ({ valeur: e.id, libelle: referentiel.libelleEducateur(e.id) }));
+  }, [axe, referentiel]);
+
+  /* Une fiche sans personne choisie n'affiche rien : on prend la première. */
+  useEffect(() => {
+    if (!estFiche(axe)) return;
+    setPersonneSuivie((actuelle) =>
+      actuelle && personnesSuivables.some((p) => p.valeur === actuelle)
+        ? actuelle
+        : (personnesSuivables[0]?.valeur ?? null),
+    );
+  }, [axe, personnesSuivables, setPersonneSuivie]);
+
   return (
     <div className="space-y-4">
       <div className="no-print flex flex-wrap items-end gap-3">
@@ -1046,13 +1292,24 @@ function EcranPlanning({
             />
           </Champ>
         </div>
-        <div className="w-44">
-          <Champ libelle="Axe">
-            <Selecteur valeur={axe} onChange={setAxe} options={AXES} />
+        <div className="w-52">
+          <Champ libelle="Vue">
+            <Selecteur valeur={axe} onChange={setAxe} options={AFFICHAGES} />
           </Champ>
         </div>
+        {estFiche(axe) && (
+          <div className="w-52">
+            <Champ libelle={axe === 'jeune' ? 'Jeune suivi' : 'Éducateur suivi'}>
+              <Selecteur
+                valeur={personneSuivie ?? ''}
+                onChange={setPersonneSuivie}
+                options={personnesSuivables}
+              />
+            </Champ>
+          </div>
+        )}
         <div className="w-56">
-          <Champ libelle="Affichage">
+          <Champ libelle="Source">
             <Selecteur
               valeur={source}
               onChange={setSource}
@@ -1129,35 +1386,61 @@ function EcranPlanning({
           sousTitre={
             montreReparation
               ? `${journee.reparation.changements.length} changement(s), coût ${journee.reparation.cout}`
-              : `${planning.creneaux.length} créneaux, ${referentiel.grille.nbPas} pas de ${referentiel.grille.pasMinutes} min`
+              : `${planning.creneaux.length} créneaux, pas de ${referentiel.grille.pasMinutes} min`
           }
         >
-          <Grille
-            referentiel={referentiel}
-            planning={planning}
-            axe={axe}
-            signalements={signalements}
-            onCreneau={setCreneauOuvert}
-          />
+          {estFiche(axe) ? (
+            <Fiche
+              referentiel={referentiel}
+              planning={planning}
+              type={axe}
+              personneId={personneSuivie}
+              signalements={signalements}
+              onCreneau={setCreneauOuvert}
+            />
+          ) : (
+            <Grille
+              referentiel={referentiel}
+              planning={planning}
+              affichage={axe}
+              signalements={signalements}
+              onCreneau={setCreneauOuvert}
+            />
+          )}
         </Carte>
       </div>
 
       <div className="no-print grid gap-4 lg:grid-cols-2">
-        <Carte titre="Salles libres" sousTitre="La grille des salles moins ce qui les occupe, pas par pas">
-          <div className="space-y-1">
-            {libres.map((c) => (
-              <div key={c.pas} className="flex items-baseline gap-3 text-sm">
-                <span className="w-12 shrink-0" style={{ fontFamily: F_MONO, color: 'var(--ink-soft)' }}>
-                  {c.heure}
-                </span>
-                <span style={{ color: c.libres.length === 0 ? 'var(--crisis)' : 'var(--ink)' }}>
-                  {c.libres.length === 0
-                    ? 'aucune salle libre'
-                    : c.libres.map((id) => referentiel.salle(id)?.nom ?? id).join(', ')}
-                </span>
-              </div>
-            ))}
-          </div>
+        <Carte titre="Salles libres" sousTitre="La grille des salles moins ce qui les occupe">
+          {referentiel.structure.salles.length === 0 ? (
+            <Vide>Aucune salle saisie — l’écran Structure les crée.</Vide>
+          ) : (
+            <div className="space-y-1">
+              {/* Les pas où la même chose est libre se replient en une plage :
+                  au pas de 5 minutes, la version pas-à-pas faisait 78 lignes
+                  pour dire trois choses. */}
+              {libres
+                .reduce((plages, c) => {
+                  const cle = c.libres.join(' ');
+                  const derniere = plages[plages.length - 1];
+                  if (derniere && derniere.cle === cle) derniere.fin = c.pas + 1;
+                  else plages.push({ cle, libres: c.libres, debut: c.pas, fin: c.pas + 1 });
+                  return plages;
+                }, [])
+                .map((p) => (
+                  <div key={p.debut} className="flex items-baseline gap-3 text-sm">
+                    <span className="w-24 shrink-0" style={{ fontFamily: F_MONO, color: 'var(--ink-soft)' }}>
+                      {referentiel.grille.heureDePas(p.debut)}–{referentiel.grille.heureDePas(p.fin)}
+                    </span>
+                    <span style={{ color: p.libres.length === 0 ? 'var(--crisis)' : 'var(--ink)' }}>
+                      {p.libres.length === 0
+                        ? 'aucune salle libre'
+                        : p.libres.map((id) => referentiel.salle(id)?.nom ?? id).join(', ')}
+                    </span>
+                  </div>
+                ))}
+            </div>
+          )}
         </Carte>
 
         <Carte
@@ -1174,7 +1457,12 @@ function EcranPlanning({
                     {referentiel.libelleJeune(o.jeuneId)}
                   </span>
                   <span style={{ fontFamily: F_MONO, color: 'var(--ink-soft)' }}>
-                    {o.pas.map((p) => referentiel.grille.heureDePas(p)).join(' · ')}
+                    {plagesDePas(o.pas)
+                      .map(
+                        (p) =>
+                          `${referentiel.grille.heureDePas(p.debut)}–${referentiel.grille.heureDePas(p.fin)}`,
+                      )
+                      .join(' · ')}
                   </span>
                 </div>
               ))}
@@ -3277,7 +3565,10 @@ export default function App() {
   const [resultat, setResultat] = useState(null);
   const [jourAffiche, setJourAffiche] = useState(null);
   const [dateAffichee, setDateAffichee] = useState(null);
-  const [axe, setAxe] = useState('salle');
+  /* La vue par activité est celle du document d'origine : c'est elle qu'on
+     ouvre par défaut. */
+  const [axe, setAxe] = useState('activite');
+  const [personneSuivie, setPersonneSuivie] = useState(null);
   /* Le créneau ouvert vit ici, pas dans l'écran Planning : une erreur de
      validation cliquée depuis n'importe quel écran doit pouvoir l'ouvrir. */
   const [creneauOuvert, setCreneauOuvert] = useState(null);
@@ -3369,16 +3660,14 @@ export default function App() {
     setJourAffiche((actuel) => (actuel && jours.includes(actuel) ? actuel : (jours[0] ?? null)));
   }, [referentiel]);
 
-  /* Même raison pour l'axe : « par salle » ne dessine rien sur un planning
-     importé d'un tableur, qui n'en nomme aucune. On retombe sur le premier axe
-     qui a de quoi s'afficher plutôt que d'ouvrir sur une grille vide. */
+  /* « par salle » ne dessine rien tant qu'aucune salle n'est saisie, et un
+     planning importé d'un tableur n'en nomme jamais. On retombe sur la vue par
+     activité plutôt que d'ouvrir sur une grille vide. */
   useEffect(() => {
     if (!referentiel) return;
-    setAxe((actuel) =>
-      colonnesDe(referentiel, actuel).length > 0
-        ? actuel
-        : (AXES.map((a) => a.valeur).find((a) => colonnesDe(referentiel, a).length > 0) ?? actuel),
-    );
+    if (referentiel.structure.salles.length === 0) {
+      setAxe((actuel) => (actuel === 'salle' ? 'activite' : actuel));
+    }
   }, [referentiel]);
 
   /* Une analyse porte sur une structure, une situation et un barème donnés :
@@ -3534,6 +3823,8 @@ export default function App() {
         setCreneauOuvert={setCreneauOuvert}
         validation={validation}
         onProbleme={ouvrirProbleme}
+        personneSuivie={personneSuivie}
+        setPersonneSuivie={setPersonneSuivie}
       />
     ) : (
       <Vide>La grille de cette structure ne déclare aucun jour d’accueil.</Vide>

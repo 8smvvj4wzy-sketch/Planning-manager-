@@ -111,6 +111,23 @@ tests et n'est jamais importé depuis `interface/`.
   anodin à l'écran produit un fichier invalide juste après — exactement ce que
   l'utilisateur venait corriger. Comme `repare`, ces fonctions ne modifient rien sur
   place : elles rendent une nouvelle structure.
+- **Les colonnes du planning ne sont pas des personnes.** Une colonne par jeune découpait
+  une même activité en autant de blocs qu'elle avait d'enfants — l'utilisateur l'a rejeté
+  d'emblée, et il a raison : ce n'est pas comme ça qu'on lit un planning. Les colonnes
+  sont des **couloirs** d'activités simultanées (`couloirsDuJour`, `src/vues.ts`), et le
+  sort d'une personne se lit dans sa fiche (`journeeDe`). Le document d'origine fait
+  exactement ça, et c'est lui la référence de forme.
+- **L'axe des temps se gradue sur les bornes réelles, pas sur les pas.** Une ligne par pas
+  donnait 78 lignes de 34 px pour une journée au pas de 5 minutes, là où le document
+  d'origine en porte treize. `bornesDuJour` (`src/vues.ts`) ne rend que les moments où
+  quelque chose change ; la hauteur d'une bande suit sa durée **et** ce que son contenu
+  réclame — sans le second terme, un accueil à cinq paires se fait tronquer par une heure
+  de repas de même durée.
+- **Rien ne s'affiche pas par pas.** Même famille que les deux points précédents :
+  « Jeunes sans affectation » listait 78 horaires, « Salles libres » 78 lignes identiques.
+  `plagesDePas` (`src/vues.ts`) replie des pas contigus en plages. Dès qu'une liste
+  d'écran vient d'une boucle sur `tousLesPas()`, elle doit être repliée avant d'être
+  rendue.
 - **Un chevauchement se signale une fois, pas à chaque pas.** La détection travaille pas
   par pas — seul moyen de comparer des créneaux qui ne s'alignent pas — mais
   `verifieChevauchements` regroupe avant de rendre. Au pas de 5 minutes, trois collisions

@@ -127,7 +127,17 @@ export {
   retireEducateurDesBinomes,
 } from './affectations.ts';
 export { estDetacheSur, groupesDeReference } from './detachement.ts';
-export { educateursLibres, jeunesSansAffectation, sallesLibres } from './vues.ts';
+export {
+  bornesDuJour,
+  couloirsDuJour,
+  educateursLibres,
+  jeunesSansAffectation,
+  journeeDe,
+  plagesDePas,
+  sallesLibres,
+  type Couloirs,
+  type LigneJournee,
+} from './vues.ts';
 
 export {
   analyseCellule,
