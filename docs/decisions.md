@@ -878,3 +878,61 @@ une règle de souple à dure passe exactement par là.
 Une règle d'un type **inconnu** de ce moteur n'a pas de descripteur, donc pas de formulaire
 possible. Sa carte affiche le JSON brut, en lecture seule. Éditer à l'aveugle quelque chose
 que rien n'évaluera serait pire que de ne pas l'éditer.
+
+## 26. Les champs qui manquaient, et une référence qui pendait
+
+L'écran Structure ne saisissait que quatre listes plates. Présences réelles, groupes,
+pauses, détails d'activité, tags de salle : tout cela n'existait que dans un fichier écrit
+à la main. Les pauses, surtout — sans elles, le correctif de la décision 23 restait
+**inatteignable** pour un planning construit dans l'application.
+
+### Un panneau de détails, pas quatre cartes de plus
+
+`CarteEditable` porte les quatre listes parce qu'elles se ressemblent au point que les
+écrire séparément ferait quatre fois le même bug. Les nouveaux champs ne tiennent pas dans
+une ligne plate ; ils vont donc dans un panneau qui se déplie, fourni par chaque carte via
+un `details`. La carte reste générique, et chaque type décrit ce qui lui est propre.
+
+`secondaire` devient facultatif au passage, et ce n'est pas une commodité. La carte Groupes
+affichait l'effectif dans un `<input number>` que rien n'écoutait : **un champ modifiable
+sans effet est pire que pas de champ.** L'effectif se déduit de `jeune.groupeId` ; deux
+endroits pour la même information finiraient par se contredire. Il se lit maintenant.
+
+### Un jour absent n'est pas un jour à zéro
+
+`SemaineDePlages` sert aux présences et aux disponibilités — mêmes données, un seul
+composant. La case décide de la **présence de la clé**, pas d'un intervalle vide : un jour
+absent de l'objet veut dire « pas accueilli ». Laisser une plage `00:00–00:00` derrière une
+case décochée aurait fait continuer le moteur à compter la personne, sans que l'écran le
+montre.
+
+Même logique ailleurs : `activite.educateursRequis` à `null` veut dire « déduit de la somme
+des encadrements », pas « aucun éducateur ». Le champ vide rend `null`, jamais `0`.
+
+### La référence qui pendait, trouvée grâce aux descripteurs
+
+`sansLaPersonne` nettoyait les `cibles` d'une règle mais **pas ses `params`**. Supprimer un
+éducateur nommé dans `educateurs_interdits.params.educateurs` laissait un id cassé, et la
+validation refusait la structure juste après un geste sans ambiguïté — exactement le défaut
+que ce module existe pour éviter, et qui avait déjà été attrapé une fois sur les
+`sallesPossibles`. Idem pour les salles et les activités.
+
+Les params ne se devinent pas : `educateurs_interdits` range sa liste sous `educateurs`,
+`perimetre_renfort` sous `jeunesAutorises`, `salle_requise` sous `salles`. Ce sont **les
+descripteurs de la décision 25** qui disent où chercher (`forme: 'ids'`, `table`) — la même
+source qui construit les formulaires. Écrire ici une seconde table de correspondance aurait
+divergé du catalogue au premier type ajouté.
+
+Je ne l'ai pas vu à la relecture : je l'ai sondé, parce que les descripteurs venaient de
+rendre la question posable.
+
+**Une règle qui se retrouve avec une liste vide n'est pas effacée en silence.** La
+validation la signale. Supprimer le dernier éducateur autorisé d'un jeune change ce que la
+règle veut dire ; l'effacer sans rien dire relâcherait une contrainte que quelqu'un avait
+posée en réunion. C'est à l'établissement de trancher.
+
+### Un groupe se supprime, une activité non
+
+`supprimeGroupe` délie les jeunes qui s'y rattachaient. `supprimeActivite`, lui, **refuse**
+tant qu'un créneau s'en sert. La différence n'est pas arbitraire : un créneau sans activité
+n'existe pas, un jeune sans groupe existe très bien.

@@ -229,6 +229,24 @@ tests et n'est jamais importé depuis `interface/`.
   `undefined` **retire** la clé (`modifieRegle`, `modifieParamRegle`). Passer une règle de
   souple à dure passe par là.
 
+- **Nettoyer les `cibles` d'une règle ne suffit pas : ses `params` en portent aussi.**
+  `educateurs_interdits` range sa liste sous `educateurs`, `perimetre_renfort` sous
+  `jeunesAutorises`, `salle_requise` sous `salles`. Supprimer un éducateur sans les toucher
+  laissait une référence cassée que la validation refuse — le défaut même que `src/edition.ts`
+  existe pour éviter. `reglesSansReferenceA` s'en charge en lisant les **descripteurs**
+  (`forme: 'ids'`, `table`), donc sans seconde table de correspondance à tenir à jour. Une
+  règle qui finit avec une liste vide est **signalée, pas effacée** : c'est un arbitrage, pas
+  une conséquence mécanique. Voir `docs/decisions.md` §26.
+- **Un champ modifiable sans effet est pire que pas de champ.** La carte Groupes affichait
+  l'effectif dans un `<input number>` que rien n'écoutait. `secondaire` est facultatif dans
+  `CarteEditable` précisément pour ça : quand une valeur se déduit d'ailleurs
+  (`jeune.groupeId` ici), elle se lit.
+- **Une case décochée doit retirer la clé, pas poser une valeur vide.** `SemaineDePlages` :
+  un jour absent de `presence`/`disponibilites` veut dire « pas accueilli » ; y laisser
+  `00:00–00:00` ferait continuer le moteur à compter la personne sans que l'écran le montre.
+  Même famille que `educateursRequis: null` (« déduit de la somme des encadrements »), qui
+  n'est pas `0` (« aucun éducateur ») — le champ vide rend `null`.
+
 ## Avant toute livraison
 
 ```bash

@@ -23,16 +23,20 @@
 
 import { idUnique } from './import/identifiants.ts';
 import { evaluateurDe } from './regles/registre.ts';
+import type { TableCible } from './regles/base.ts';
 import { heureEnMinutes } from './temps.ts';
 import type {
   Activite,
   Affectation,
   Cibles,
   CreneauType,
+  DateIso,
   Educateur,
   Heure,
+  Groupe,
   Jeune,
   Jour,
+  Pause,
   Plage,
   Quinzaine,
   Regle,
@@ -264,15 +268,57 @@ export function modifieSalle(
 /* ==================== Jeunes, educateurs, activites ==================== */
 
 /**
+ * Efface un id partout ou une REGLE le nomme : dans ses `cibles`, et dans ceux
+ * de ses params qui portent des ids de cette table.
+ *
+ * Les params ne se devinent pas : `educateurs_interdits` range sa liste sous
+ * `educateurs`, `perimetre_renfort` sous `jeunesAutorises`, `salle_requise`
+ * sous `salles`. Nettoyer les cibles sans eux laissait une reference cassee que
+ * la validation refuse — trouve en sondant, apres que les descripteurs ont
+ * rendu la verification possible.
+ *
+ * Ces descripteurs (`forme: 'ids'`, `table`) sont justement ce qui dit ou
+ * chercher, et c'est la meme source qui construit les formulaires. Ecrire ici
+ * une seconde table de correspondance aurait divergé du catalogue au premier
+ * type ajoute.
+ *
+ * Une regle qui se retrouve avec une liste VIDE n'est pas silencieusement
+ * effacee : la validation la signale. C'est voulu — supprimer le dernier
+ * educateur autorise d'un jeune change ce que la regle veut dire, et c'est a
+ * l'etablissement de trancher, pas au code.
+ */
+function reglesSansReferenceA(regles: readonly Regle[], id: string, table: TableCible): Regle[] {
+  return regles.map((regle) => {
+    let suite = regle;
+
+    const cibles = regle.cibles[table];
+    if (cibles?.includes(id)) {
+      suite = { ...suite, cibles: { ...suite.cibles, [table]: cibles.filter((x) => x !== id) } };
+    }
+
+    for (const champ of evaluateurDe(regle.type)?.champs ?? []) {
+      if (champ.forme !== 'ids' || champ.table !== table) continue;
+      const liste = suite.params?.[champ.cle];
+      if (!Array.isArray(liste) || !liste.includes(id)) continue;
+      suite = {
+        ...suite,
+        params: { ...suite.params, [champ.cle]: liste.filter((x) => x !== id) },
+      };
+    }
+    return suite;
+  });
+}
+
+/**
  * Retire une personne de PARTOUT : c'est la seule facon de la supprimer sans
  * laisser une reference cassee derriere soi.
  *
- * Une personne est citee a quatre endroits en plus de sa propre liste — les
+ * Une personne est citee a cinq endroits en plus de sa propre liste — les
  * `jeunes`/`educateurs` d'un creneau, ses `affectations`, les `refEducateurs`
- * d'un groupe, et les `cibles` d'une regle. En oublier un rend la structure
- * invalide juste apres un geste qui, a l'ecran, n'avait rien d'ambigu. Meme
- * lecon que `supprimeSalle`, ou l'oubli des `sallesPossibles` avait ete
- * rattrape par un test et non a la relecture.
+ * d'un groupe, les `cibles` d'une regle et les `params` d'une regle. En oublier
+ * un rend la structure invalide juste apres un geste qui, a l'ecran, n'avait
+ * rien d'ambigu. Meme lecon que `supprimeSalle`, ou l'oubli des
+ * `sallesPossibles` avait ete rattrape par un test et non a la relecture.
  */
 function sansLaPersonne(structure: Structure, id: string, type: 'jeune' | 'educateur'): Structure {
   const planningType = structure.planningType.map((creneau) => {
@@ -291,12 +337,7 @@ function sansLaPersonne(structure: Structure, id: string, type: 'jeune' | 'educa
             g.refEducateurs?.includes(id) ? { ...g, refEducateurs: g.refEducateurs.filter((x) => x !== id) } : g,
           )
         : structure.groupes,
-    regles: structure.regles.map((regle) => {
-      const cle = type === 'jeune' ? 'jeunes' : 'educateurs';
-      const cibles = regle.cibles[cle];
-      if (!cibles?.includes(id)) return regle;
-      return { ...regle, cibles: { ...regle.cibles, [cle]: cibles.filter((x) => x !== id) } };
-    }),
+    regles: reglesSansReferenceA(structure.regles, id, type === 'jeune' ? 'jeunes' : 'educateurs'),
   };
 }
 
@@ -410,16 +451,21 @@ export function supprimeActivite(structure: Structure, id: string): Structure {
       `"${id}" sert encore a ${utilisee} creneau(x) : supprimez-les ou changez leur activite d'abord.`,
     );
   }
-  return { ...structure, activites: structure.activites.filter((a) => a.id !== id) };
+  return {
+    ...structure,
+    activites: structure.activites.filter((a) => a.id !== id),
+    regles: reglesSansReferenceA(structure.regles, id, 'activites'),
+  };
 }
 
 /**
  * Supprime une salle, et efface partout ailleurs ce qui la nommait.
  *
- * Une salle est citee a deux endroits en plus de sa propre liste : le creneau
- * qui s'y tient, et les `sallesPossibles` des activites. Laisser l'une ou
- * l'autre derriere soi casse une reference, et la validation refuse alors la
- * structure — a cause d'un geste qui, a l'ecran, n'avait rien d'ambigu.
+ * Une salle est citee a quatre endroits en plus de sa propre liste : le creneau
+ * qui s'y tient, les `sallesPossibles` des activites, les cibles d'une regle et
+ * les `salles` d'une regle `salle_requise`. Laisser l'un d'eux derriere soi
+ * casse une reference, et la validation refuse alors la structure — a cause
+ * d'un geste qui, a l'ecran, n'avait rien d'ambigu.
  */
 export function supprimeSalle(structure: Structure, id: string): Structure {
   if (!structure.salles.some((s) => s.id === id)) throw new Error(`Salle inconnue : "${id}"`);
@@ -432,6 +478,7 @@ export function supprimeSalle(structure: Structure, id: string): Structure {
         : a,
     ),
     planningType: structure.planningType.map((c) => (c.salleId === id ? { ...c, salleId: null } : c)),
+    regles: reglesSansReferenceA(structure.regles, id, 'salles'),
   };
 }
 
@@ -531,4 +578,110 @@ export function modifieParamRegle(
 export function supprimeRegle(structure: Structure, id: string): Structure {
   if (!structure.regles.some((r) => r.id === id)) throw new Error(`Regle inconnue : "${id}"`);
   return { ...structure, regles: structure.regles.filter((r) => r.id !== id) };
+}
+
+/* ==================== Groupes ==================== */
+
+export function ajouteGroupe(structure: Structure, groupe: Omit<Groupe, 'id'>): Structure {
+  const id = idUnique(groupe.nom, new Set(structure.groupes.map((g) => g.id)));
+  return { ...structure, groupes: [...structure.groupes, { ...groupe, id }] };
+}
+
+export function modifieGroupe(
+  structure: Structure,
+  id: string,
+  changement: Partial<Omit<Groupe, 'id'>>,
+): Structure {
+  if (!structure.groupes.some((g) => g.id === id)) throw new Error(`Groupe inconnu : "${id}"`);
+  return {
+    ...structure,
+    groupes: structure.groupes.map((g) => (g.id === id ? { ...g, ...changement } : g)),
+  };
+}
+
+/**
+ * Supprime un groupe, et delie les jeunes qui s'y rattachaient.
+ *
+ * Un jeune sans groupe reste un jeune : `groupeId` est facultatif, et le moteur
+ * s'en passe partout sauf pour les regles qui ciblent des groupes. Le refus
+ * qu'on applique aux activites (`supprimeActivite`) n'aurait pas de sens ici —
+ * un creneau ne peut pas exister sans activite, un jeune existe tres bien sans
+ * groupe.
+ */
+export function supprimeGroupe(structure: Structure, id: string): Structure {
+  if (!structure.groupes.some((g) => g.id === id)) throw new Error(`Groupe inconnu : "${id}"`);
+  return {
+    ...structure,
+    groupes: structure.groupes.filter((g) => g.id !== id),
+    jeunes: structure.jeunes.map((j) => {
+      if (j.groupeId !== id) return j;
+      const { groupeId: _retire, ...reste } = j;
+      return reste as Jeune;
+    }),
+    regles: reglesSansReferenceA(structure.regles, id, 'groupes'),
+  };
+}
+
+/* ==================== Pauses ==================== */
+
+/**
+ * Les pauses de la grille : les temps communs ou le moteur n'affecte personne
+ * et ne reclame aucun encadrement (voir `docs/decisions.md` §23).
+ *
+ * Sans un endroit pour les saisir, ce correctif restait inatteignable pour un
+ * planning construit a la main : seul un fichier ecrit a la main pouvait en
+ * porter. C'est le sens de ces trois fonctions.
+ *
+ * `pas` est borne a 1 : une pause de duree nulle ne couvre aucun pas et ne
+ * ferait rien, tout en ayant l'air posee.
+ */
+export function ajoutePause(structure: Structure, pause: Pause): Structure {
+  return {
+    ...structure,
+    grille: {
+      ...structure.grille,
+      pauses: [...(structure.grille.pauses ?? []), { ...pause, pas: Math.max(1, Math.round(pause.pas)) }],
+    },
+  };
+}
+
+export function modifiePause(structure: Structure, index: number, changement: Partial<Pause>): Structure {
+  const pauses = structure.grille.pauses ?? [];
+  if (!pauses[index]) throw new Error(`Pause inconnue a l'index ${index}`);
+  return {
+    ...structure,
+    grille: {
+      ...structure.grille,
+      pauses: pauses.map((p, i) => {
+        if (i !== index) return p;
+        const suite = { ...p, ...changement };
+        return { ...suite, pas: Math.max(1, Math.round(suite.pas)) };
+      }),
+    },
+  };
+}
+
+export function supprimePause(structure: Structure, index: number): Structure {
+  const pauses = structure.grille.pauses ?? [];
+  if (!pauses[index]) throw new Error(`Pause inconnue a l'index ${index}`);
+  return {
+    ...structure,
+    grille: { ...structure.grille, pauses: pauses.filter((_, i) => i !== index) },
+  };
+}
+
+/**
+ * Ancre de l'alternance une semaine sur deux. `null` la retire.
+ *
+ * Passait jusqu'ici par une reconstruction de `grille` dans l'interface, avec
+ * un `delete` deguise en destructuration — un geste de moteur ecrit dans le
+ * JSX. Il n'y a aucune regle metier ici, mais il y a un invariant : la cle
+ * ABSENTE et la cle a `undefined` ne valent pas la meme chose pour le schema.
+ */
+export function fixeSemaineAOrigine(structure: Structure, date: DateIso | null): Structure {
+  if (date === null) {
+    const { semaineAOrigine: _retire, ...grille } = structure.grille;
+    return { ...structure, grille };
+  }
+  return { ...structure, grille: { ...structure.grille, semaineAOrigine: date } };
 }
