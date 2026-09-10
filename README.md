@@ -210,8 +210,10 @@ const correspondances = proposeCorrespondances(referentiel, nomsRencontres(lu));
 const { structure, problemes } = assemble(lu, { base: structureExistante, correspondances });
 ```
 
-`assemble()` remplace les créneaux du jour importé sans toucher aux autres — réimporter
-le même jour ne les duplique pas. Un créneau sans binôme nommé (une activité collective)
+`assemble()` remplace par défaut les créneaux du jour importé sans toucher aux autres —
+réimporter le même jour ne les duplique pas. Avec `surJoursImportes: 'ajoute'`, ils
+s'**ajoutent** : c'est ainsi qu'on fusionne les plannings de deux classes qui partagent
+les mêmes journées, et que les conflits de salle entre elles deviennent visibles. Un créneau sans binôme nommé (une activité collective)
 garde des listes vides plutôt que d'inventer qui y participe, et c'est signalé.
 
 ## Organisation
