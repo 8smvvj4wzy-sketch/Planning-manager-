@@ -80,6 +80,19 @@ describe('édition d un créneau', () => {
     assert.throws(() => termineCreneauA(structureMinimale(), 'c1', '08:00'), /08:00/);
   });
 
+  it('pose et retire l alternance une semaine sur deux', () => {
+    // Retirer demande un sentinel : `undefined` voudrait dire « ne touche pas
+    // à ce champ », pas « toutes les semaines ».
+    const avec = modifieCreneau(structureMinimale(), 'c1', { quinzaine: 'B' });
+    assert.equal(avec.planningType[0]!.quinzaine, 'B');
+
+    const sans = modifieCreneau(avec, 'c1', { quinzaine: null });
+    assert.ok(!('quinzaine' in sans.planningType[0]!), 'le champ disparaît, il ne vaut pas null');
+
+    const intact = modifieCreneau(avec, 'c1', { pas: 1 });
+    assert.equal(intact.planningType[0]!.quinzaine, 'B', 'un autre changement n’y touche pas');
+  });
+
   it('ne garde pas deux fois la même personne', () => {
     const s = modifieCreneau(structureMinimale(), 'c1', { jeunes: ['ja', 'ja', 'jb'] });
     assert.deepEqual(s.planningType[0]!.jeunes, ['ja', 'jb']);

@@ -44,6 +44,10 @@ imprime le planning obtenu.
 - **fiche d'un jeune** / **fiche d'un éducateur** — une journée en liste, avec qui elle se
   passe, et les trous marqués.
 
+Un sélecteur **Semaine A / Semaine B** apparaît dès qu'un créneau n'a lieu qu'une semaine
+sur deux — le cas des activités qui alternent. Deux créneaux de semaines différentes ne se
+chevauchent jamais : ce sont des alternatives.
+
 Cliquer un créneau l'ouvre et le **modifie** : horaires, salle, jeunes, éducateurs,
 suppression. Un planning importé arrive presque toujours avec de vraies collisions — deux
 activités au même moment, quelqu'un affecté deux fois : elles sont listées au-dessus de la

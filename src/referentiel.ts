@@ -11,6 +11,7 @@ import type {
   Groupe,
   Jeune,
   Jour,
+  Quinzaine,
   Salle,
   Structure,
 } from './types.ts';
@@ -80,7 +81,21 @@ export class Referentiel {
     return this.structure.salles.filter((s) => (s.tags ?? []).includes(tag));
   }
 
-  creneauxTypeDuJour(jour: Jour): CreneauType[] {
-    return this.structure.planningType.filter((c) => c.jour === jour);
+  /**
+   * Creneaux d'un jour, filtres sur une quinzaine si on en demande une.
+   *
+   * Un creneau sans `quinzaine` a lieu TOUTES les semaines : il ressort aussi
+   * bien cote A que cote B. C'est le filtre pivot de l'alternance — tout ce qui
+   * enumere les creneaux d'un jour passe par ici.
+   */
+  creneauxTypeDuJour(jour: Jour, quinzaine?: Quinzaine): CreneauType[] {
+    return this.structure.planningType.filter(
+      (c) => c.jour === jour && (quinzaine === undefined || c.quinzaine === undefined || c.quinzaine === quinzaine),
+    );
+  }
+
+  /** La structure fait-elle alterner des semaines ? */
+  get aDesQuinzaines(): boolean {
+    return this.structure.planningType.some((c) => c.quinzaine !== undefined);
   }
 }

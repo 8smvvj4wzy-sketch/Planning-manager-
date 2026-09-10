@@ -630,3 +630,55 @@ l'outillage cessait de voir le code, sans rien dire.
 D'où un sixième contrôle dans `verifier.sh`, vérifié en le mettant volontairement en
 échec avant de le garder. Un séparateur NUL délibéré s'écrit en échappement — c'est ce
 que fait `src/affectations.ts` — jamais en octet brut.
+
+## 19. Semaine A, semaine B : des alternatives, pas un chevauchement
+
+Deux des trois conflits qui restaient sur le fichier réel venaient du mercredi, où
+« Semaine A » et « Semaine B » sont écrites dans les mêmes cellules, avec les mêmes
+jeunes. Le modèle n'avait pas la notion de semaine paire/impaire : il y voyait deux
+activités simultanées. Ce sont des **alternatives**, qui ne coexistent jamais.
+
+**Le champ.** `CreneauType.quinzaine?: 'A' | 'B'`, absent = toutes les semaines. Pas
+`semaine` : `Semaine<T>` est déjà pris par l'emploi du temps hebdomadaire
+(`Jeune.presence`). « Quinzaine » nomme le cycle de deux semaines ; l'écran, lui, dit
+« semaine A / semaine B », comme le document.
+
+**Le filtre.** `Referentiel.creneauxTypeDuJour(jour, quinzaine?)` est le pivot : un
+créneau sans quinzaine ressort des deux côtés, puisqu'il a lieu chaque semaine. Le
+paramètre remonte à `planningTypeDuJour` et redescend dans `planningInitial`, qui possède
+déjà la date.
+
+**La détection.** `verifieChevauchements` fait deux passes — A, puis B — avec deux tables
+d'occupation mais **une seule** table de collisions, dont les pas sont un `Set` : deux
+créneaux hebdomadaires sont examinés dans les deux passes et ne doivent être comptés
+qu'une fois. Un conflit *à l'intérieur* d'une semaine reste détecté ; c'est seulement
+entre A et B que la rencontre n'a plus lieu.
+
+**L'ancre.** `Grille.semaineAOrigine` : « la semaine contenant cette date est une semaine
+A ». `quinzaineDeLaDate` (`src/dates.ts`) compare les **lundis** des deux semaines et
+prend la parité de l'écart en jours. Surtout pas le numéro de semaine ISO : une année en
+compte parfois 53, et l'alternance se retournerait toute seule au 1ᵉʳ janvier. Sans ancre,
+une analyse datée mélangerait les deux : c'est signalé (`grille.alternance`), non bloquant
+— le planning type, lui, se lit très bien semaine par semaine.
+
+**La lecture du tableur, sans quoi le champ ne servirait à rien.** Le fichier réel écrit
+`"Protocole Semaine A:\nAdiyan / Sabrina\n\nProtocole Semaine B:\nAdiyan / Agathe"` dans
+**une seule cellule**. `analyseCellule` rendait une seule lecture : les deux semaines
+fondues, Sabrina et Agathe posées ensemble, et un conflit fabriqué de toutes pièces. Elle
+rend désormais une **liste de blocs**, un nouveau bloc s'ouvrant à chaque ligne qui porte
+un `:` sans `/`.
+
+Le marqueur `semaine A|B` est ensuite retiré du nom. Quand il ne restait que lui, deux
+replis, dans cet ordre :
+
+1. le vrai nom est sur la ligne suivante (« Semaine A : / Motricité fine + Tartinage / …
+   ») — on le prend, **mais seulement si le bloc porte des binômes**, sinon on baptiserait
+   l'activité du nom d'une personne ;
+2. sinon, le bloc hérite du dernier nom rencontré au-dessus de lui dans la même cellule
+   (« Détache: / Angie / Semaine A : / Camille » → « Détache », semaine A). Sans ce second
+   repli ces blocs ressortaient « (sans nom) » : exact, et inexploitable.
+
+**Résultat sur le fichier réel** (jamais commité) : les deux conflits du mercredi
+disparaissent. Il reste **une** erreur — une éducatrice sur deux activités le jeudi à
+14h30, une vraie double affectation à arbitrer. Le trajet complet depuis le premier
+import : 570 → 154 → 66 → 6 → **1**.

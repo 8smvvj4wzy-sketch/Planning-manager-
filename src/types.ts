@@ -54,12 +54,28 @@ export interface Pause {
   libelle: string;
 }
 
+/**
+ * Quelle semaine d'une alternance une semaine sur deux.
+ *
+ * PAS `Semaine`, deja pris par l'emploi du temps hebdomadaire
+ * (`Jeune.presence`). « Quinzaine » nomme le cycle de deux semaines ; a
+ * l'ecran, ca se dit « semaine A » et « semaine B », comme dans le planning
+ * d'origine.
+ */
+export type Quinzaine = 'A' | 'B';
+
 export interface Grille {
   pasMinutes: number;
   jours: Jour[];
   debut: Heure;
   fin: Heure;
   pauses?: Pause[];
+  /**
+   * Ancre de l'alternance : la semaine CONTENANT cette date est une semaine A.
+   * Tout le reste s'en deduit par parite. Absente = l'alternance n'est pas
+   * datable, et une analyse datee melangera A et B (signale a la validation).
+   */
+  semaineAOrigine?: DateIso;
 }
 
 // --------------------------------------------------------------------------
@@ -164,6 +180,15 @@ export interface Affectation {
 export interface CreneauType {
   id: string;
   jour: Jour;
+  /**
+   * Ce creneau n'a lieu qu'une semaine sur deux. Absent = toutes les semaines.
+   *
+   * Un planning reel fait alterner des activites : « Semaine A : motricite
+   * fine » et « Semaine B : parcours moteur » sur le meme creneau, avec les
+   * memes jeunes. Sans ce champ, les deux se voient comme un chevauchement —
+   * alors que ce sont des ALTERNATIVES qui ne coexistent jamais.
+   */
+  quinzaine?: Quinzaine;
   debut: Heure;
   /** Duree en nombre de pas. */
   pas: number;
