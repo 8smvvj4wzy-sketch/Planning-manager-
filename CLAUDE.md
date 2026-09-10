@@ -253,9 +253,14 @@ tests et n'est jamais importé depuis `interface/`.
 ./verifier.sh
 ```
 
-Cinq contrôles, dans l'ordre où ils attrapent le plus de choses. Ne rien livrer
+Six contrôles, dans l'ordre où ils attrapent le plus de choses. Ne rien livrer
 sur un contrôle rouge — la CI (`.github/workflows/deploy.yml`) fait passer le
 vérificateur avant le build, et la publication en dépend.
+
+**Les tests d'interface n'y sont pas**, délibérément : ils lancent un navigateur, et
+ce script est la porte du déploiement. Ils ont leur propre commande
+(`npm run test:interface`) et leur propre job en CI, dont le build dépend aussi — une
+spec rouge arrête donc la publication au même titre qu'un test de moteur rouge.
 
 **`vite build` ne suffit pas.** Il résout les imports mais ne dit rien d'un
 identifiant devenu libre après un renommage : il le laisse passer, et l'erreur

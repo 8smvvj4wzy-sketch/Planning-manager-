@@ -138,8 +138,27 @@ const CLE_ACCENT = `${PREFIXE}accent`;
 /* Les fichiers déposés ou collés, pour pouvoir les reprendre sans les
    redemander. Ils portent de VRAIS prénoms : ils restent dans le navigateur de
    ce poste, n'entrent dans aucun export, et « Vider ce poste » les efface avec
-   le reste — la liste ci-dessous est la seule énumération des clés. */
+   le reste. */
 const CLE_IMPORTS = `${PREFIXE}imports`;
+
+/* Les deux moitiés de l'énumération des clés, et il en faut DEUX.
+
+   DatABA, DatABA Manager et cette application partagent la même adresse
+   `github.io`, donc le même `localStorage` : jamais de `clear()` global, et
+   toute suppression bornée au préfixe. La règle qui en découle — « toute
+   nouvelle clé va dans la liste du bouton Vider ce poste » — avait un angle
+   mort : `theme` et `accent` n'y étaient pas, et rien ne disait si c'était un
+   choix ou un oubli. Une clé oubliée là survit à un vidage sans que personne
+   ne s'en aperçoive, ce qui est précisément ce qu'on veut éviter.
+
+   D'où deux listes explicites plutôt qu'une liste et un silence. Leur UNION
+   doit couvrir toutes les clés `planning-ime:` — `test/interface/stockage.spec.ts`
+   le vérifie sur une vraie page, ce qu'aucun test de moteur ne peut faire. */
+const CLES_DONNEES = [CLE_STRUCTURE, CLE_PERIODE, CLE_SCENARIOS, CLE_OPTIONS, CLE_IMPORTS];
+/* Gardées délibérément : ce sont des préférences d'affichage, pas des données.
+   Vider un poste ne doit pas rendre son écran blanc à quelqu'un qui l'avait
+   mis en sombre. */
+const CLES_PREFERENCES = [CLE_THEME, CLE_ACCENT];
 
 const ACCENTS = [
   { id: null, nom: 'Neutre', swatch: 'var(--swatch-neutre)' },
@@ -2402,6 +2421,12 @@ function CarteRegle({ referentiel, regle, structure, setStructure }) {
 
   return (
     <div
+      // Chaque règle est une région à part entière : elle porte son propre
+      // formulaire, ses cibles et ses boutons. Le dire permet de s'y adresser
+      // — au lecteur d'écran comme au test d'interface, qui sans ça viserait
+      // la carte « Nouvelle règle » juste au-dessus.
+      role="group"
+      aria-label={`Règle ${regle.id}`}
       className="rounded-xl border p-4"
       style={{
         borderColor: inconnue ? 'var(--crisis)' : 'var(--border)',
@@ -4601,7 +4626,7 @@ function EcranReglages({ options, setOptions, theme, setTheme, accent, setAccent
               ) {
                 return;
               }
-              [CLE_STRUCTURE, CLE_PERIODE, CLE_SCENARIOS, CLE_OPTIONS, CLE_IMPORTS].forEach(effacerStockage);
+              CLES_DONNEES.forEach(effacerStockage);
               window.location.reload();
             }}
           >

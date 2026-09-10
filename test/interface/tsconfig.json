@@ -1,0 +1,24 @@
+{
+  // Les specs pilotent un navigateur : elles ont besoin de "DOM", que le moteur
+  // n'a pas et ne doit pas avoir. C'est toute la raison de ce fichier — sans
+  // lui, il faudrait ajouter "DOM" a tsconfig.json et ouvrir tout `src/` aux
+  // globals du navigateur (voir CLAUDE.md et tsconfig.check.json).
+  //
+  // Ce tsconfig est LU par le controle 1 de verifier.sh. Il ne suffit pas
+  // d'exclure les specs du typecheck du moteur : des specs non typees seraient
+  // du code mort qu'on decouvrirait casse au moment de s'en servir.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../..",
+    "lib": ["ES2023", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["node"],
+    // `@playwright/test` expose `test` et `expect` par import, pas en global :
+    // rien a declarer ici.
+    "verbatimModuleSyntax": false,
+    "allowImportingTsExtensions": true
+  },
+  "include": ["**/*.ts"]
+}

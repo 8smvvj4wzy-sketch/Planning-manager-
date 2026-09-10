@@ -936,3 +936,92 @@ posée en réunion. C'est à l'établissement de trancher.
 `supprimeGroupe` délie les jeunes qui s'y rattachaient. `supprimeActivite`, lui, **refuse**
 tant qu'un créneau s'en sert. La différence n'est pas arbitraire : un créneau sans activité
 n'existe pas, un jeune sans groupe existe très bien.
+
+## 27. Les tests d'interface, et le piège qu'ils ont failli créer
+
+Trois lots d'affilée, `./verifier.sh` a été vert **et** l'écran avait un vrai défaut : un
+champ « Poids » qui survivait à un passage en règle dure (un spread garde une clé posée à
+`undefined`), un accord grammatical faux, un sélecteur tronqué à « Dure — jamais viol », un
+champ de la carte Groupes qu'on pouvait modifier sans aucun effet. Aucun n'a été vu par le
+vérificateur : tous par un navigateur piloté à la main, avec un script jeté juste après. Ces
+parcours n'étaient rejoués par personne, et le lot suivant les aurait cassés en silence.
+
+`test/interface/` (Playwright) les rejoue en CI. Neuf spécifications, chacune avec sa
+raison d'être précise : commencer sans fichier (le trou de présence du lot 7), importer un
+tableur et corriger un chevauchement par un correctif proposé, fusionner deux classes,
+reprendre un fichier mémorisé, créer une règle et vérifier que son formulaire vient du
+descripteur puis que « Poids » disparaît en passant en dure, décocher un jour de présence,
+poser un tag et une pause, filtrer par semaine A/B, et — la plus importante — vérifier
+qu'aucune clé de `localStorage` n'échappe au préfixe `planning-ime:`.
+
+### Le typecheck du moteur ne doit PAS voir ces specs
+
+`tsconfig.check.json` incluait `test/**/*.ts`, et `tsconfig.json` n'a délibérément pas la
+lib `"DOM"` : l'ajouter ouvrirait tout `src/` aux globals du navigateur, ce que
+`src/transport/chiffrement.ts` évite déjà en n'important les types WebCrypto qu'en type
+seul. Une spec qui touche `window` ou `localStorage` aurait donc cassé le contrôle 1 du
+vérificateur, et le correctif le plus court aurait été précisément celui que ce dépôt
+refuse.
+
+`test/interface/**` est donc **exclu** de `tsconfig.check.json` et reçoit son propre
+`test/interface/tsconfig.json` (lib `ES2023` + `DOM`). Le contrôle 1 du vérificateur
+typecheck maintenant les deux : le moteur sans DOM, les specs avec. Vérifié en retirant
+l'exclusion — le contrôle tombe alors sur `stockage.spec.ts`, qui est justement la seule
+spec qui a vraiment besoin du DOM pour ce qu'elle vérifie.
+
+### Le service worker peut faire passer une suite verte sur le code d'hier
+
+`interface/main.jsx` enregistre `sw.js`, dont le precache est injecté au build
+(`vite.config.js`). Un bundle servi depuis le cache ferait passer les tests sur une version
+qui n'est plus là — le pire mode d'échec qu'une suite puisse avoir, puisqu'il ment dans le
+sens rassurant. `playwright.config.ts` bloque donc les service workers
+(`serviceWorkers: 'block'`).
+
+### La collision de stockage, enfin vérifiée sur une vraie page
+
+Le piège le plus répété de `CLAUDE.md` — jamais de `clear()` global, tout borné au préfixe
+`planning-ime:` — n'avait jamais été vérifié que par relecture, puisque `src/` ne connaît
+pas `localStorage`. `test/interface/stockage.spec.ts` regarde le stockage d'une vraie page
+et vérifie deux choses : qu'aucune clé n'échappe au préfixe, et que « Vider ce poste »
+n'oublie aucune clé de données tout en laissant les préférences (thème, accent) et les
+clés d'une autre application.
+
+Ce test a trouvé une vraie ambiguïté en cours d'écriture : `CLE_THEME` et `CLE_ACCENT`
+survivaient à un vidage sans qu'on sache si c'était voulu. La réponse — deux listes
+explicites, `CLES_DONNEES` et `CLES_PREFERENCES`, dont l'union doit couvrir toutes les
+clés `planning-ime:` — remplace une énumération et un silence par deux énumérations
+vérifiables.
+
+### Hors de `verifier.sh`, avec son propre job CI
+
+Un navigateur ne se lance pas en quelques secondes : `verifier.sh` reste la porte rapide
+du déploiement (six contrôles, aucun ne dépasse la minute). `npm run test:interface` est
+une commande séparée, et un job `interface` en CI dont `build` dépend en plus de
+`verifier` — une spec rouge arrête donc la publication, exactement comme un contrôle rouge.
+
+Playwright n'existait que dans l'environnement de développement ; `@playwright/test` est
+maintenant une vraie dépendance du dépôt (`package.json`, `package-lock.json` régénéré par
+`npm`). Le coût est réel et assumé : ~100 Mo de téléchargement de Chromium au premier run
+de chaque clé de cache CI, ramenés à quelques secondes ensuite. La clé de cache porte la
+**version** de Playwright, pas une constante : un cache indexé sur autre chose servirait un
+navigateur incompatible après une montée de version.
+
+### Deux détails qui ont coûté du temps, pour la prochaine fois
+
+- L'application est servie à la racine du preview (`base: './'` dans `vite.config.js`) :
+  `http://localhost:4173/`, pas `http://localhost:4173/Planning-manager-/`. La seconde
+  URL rend une page blanche **sans aucune erreur** — juste un 404 sur le bundle.
+- Une étape de mise en place doit **affirmer** l'état qu'elle pose, pas le supposer. Un
+  premier script cliquait sur « lundi » et « mardi » pour les « activer », alors qu'ils
+  sont cochés par défaut dans `CarteDepartVierge` : il les désactivait, et la suite
+  testait l'inverse de ce qu'elle croyait, en silence. `structureVierge` (l'utilitaire de
+  `test/interface/aide.ts`, à ne pas confondre avec la fonction du même nom dans
+  `src/edition.ts`) vérifie l'état de chaque case après l'avoir posé.
+
+### Ce que ces specs ne testent délibérément pas
+
+Le message d'un `Probleme` (« Wren est aussi sur… ») n'est jamais l'objet d'une assertion :
+c'est `Probleme.cle` qui identifie un constat côté moteur, précisément pour que le message
+reste libre d'être reformulé. Une spec qui devinerait sa formulation romprait au premier
+changement de texte sans qu'aucun comportement n'ait changé — les specs s'ancrent sur des
+régions nommées (`role="group"`, `role="dialog"`) et des comptages, jamais sur la prose.

@@ -5,7 +5,8 @@
 # Même rôle que le verifier.sh de DatABA Manager, adapté à un dépôt qui a deux
 # couches : un moteur TypeScript testé pour lui-même, et une interface JSX.
 #
-#   1. typecheck strict du moteur (tsc, y compris noUnused*)
+#   1. typecheck strict du moteur ET des tests d'interface (deux tsconfig,
+#      voir plus bas — ce n'est pas un détail d'organisation)
 #   2. noms introuvables dans l'interface — `vite build` ne les voit PAS, et un
 #      identifiant devenu libre après un renommage passe alors en production
 #      pour n'exploser qu'au clic de l'utilisateur. Déjà arrivé : CLE_JOUR
@@ -14,6 +15,11 @@
 #   4. le build de l'interface
 #   5. aucun prénom réel dans le dépôt (il est PUBLIC — voir CLAUDE.md)
 #   6. aucun octet de contrôle dans un fichier source
+#
+# Les tests d'INTERFACE ne sont pas ici : ils lancent un navigateur, et ce
+# script est la porte du déploiement — il doit rester court. Ils ont leur
+# propre commande (`npm run test:interface`) et leur propre job en CI, dont le
+# build dépend : une spec rouge arrête la publication comme un test rouge ici.
 
 set -u
 cd "$(dirname "$0")" || exit 1
@@ -22,8 +28,15 @@ ECHECS=0
 echo "════════ Vérification : Planning IME ════════"
 
 # --- 1 -----------------------------------------------------------------------
-echo "▸ 1. Typecheck du moteur"
-if npx tsc -p tsconfig.check.json; then
+# Deux tsconfig, et l'un ne peut pas absorber l'autre. Les specs d'interface
+# pilotent un navigateur : elles ont besoin de la lib "DOM", que le moteur n'a
+# PAS et ne doit pas avoir — l'ajouter à tsconfig.json ouvrirait tout `src/`
+# aux globals du navigateur (voir CLAUDE.md). `tsconfig.check.json` les exclut
+# donc, et `test/interface/tsconfig.json` les type à part. Sans cette seconde
+# commande, les specs seraient simplement NON TYPÉES : du code mort qu'on
+# découvrirait cassé le jour où l'on s'en sert.
+echo "▸ 1. Typecheck du moteur et des tests d'interface"
+if npx tsc -p tsconfig.check.json && npx tsc -p test/interface/tsconfig.json --noEmit; then
   echo "  ✓ typecheck"
 else
   echo "  ✗ typecheck"

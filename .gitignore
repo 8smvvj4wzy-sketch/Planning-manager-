@@ -2,3 +2,10 @@ node_modules/
 dist/
 *.tsbuildinfo
 .DS_Store
+
+# Sorties des tests d'interface. Une trace Playwright embarque des CAPTURES
+# D'ÉCRAN et des instantanés du DOM : lancer la suite après avoir chargé un
+# vrai planning y mettrait de vrais prénoms de jeunes, dans un dépôt public.
+# Ces deux lignes existent avant la config Playwright, pas après.
+playwright-report/
+test-results/

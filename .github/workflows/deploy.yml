@@ -32,8 +32,38 @@ jobs:
       - run: npm install
       - run: ./verifier.sh
 
+  # Les tests d'interface pilotent un navigateur : hors de verifier.sh (qui doit
+  # rester court), mais `build` en dépend quand même — une spec rouge arrête la
+  # publication, au même titre qu'un contrôle du vérificateur rouge.
+  interface:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - id: pw
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      # La clé porte la VERSION de Playwright : un cache indexé sur autre chose
+      # servirait un navigateur incompatible après une montée de version, et
+      # l'erreur serait illisible.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+      # `--with-deps` reste utile même sur cache touché : les dépendances
+      # système ne sont pas ce que le cache ci-dessus couvre.
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:interface
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: rapport-interface
+          path: playwright-report/
+
   build:
-    needs: verifier
+    needs: [verifier, interface]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
