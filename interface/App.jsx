@@ -50,6 +50,7 @@ import {
   ajouteSalle,
   assemble,
   bornesDuJour,
+  correctifsPour,
   couloirsDuJour,
   educateursAupresDe,
   auditeJourNominal,
@@ -370,6 +371,73 @@ function creneauDuChemin(chemin) {
    ce qui permet de retrouver le champ fautif dans le fichier sans le relire
    en entier. Avec `onProbleme`, chaque ligne qui vise un créneau devient
    cliquable et l'ouvre dans l'éditeur. */
+/* Un problème, et ce qu'on peut en faire.
+
+   Signaler un chevauchement ne suffit pas : il faut encore savoir par quel bout
+   le prendre. Les issues viennent de `correctifsPour` (src/correctifs.ts), du
+   moins destructeur au plus, chacune disant ce qu'elle emporte. Le moteur ne
+   choisit pas — il ne sait pas laquelle des deux activités compte, seul
+   l'établissement le sait. D'où « proposer », et jamais « corriger
+   automatiquement ». */
+function ProblemeACorriger({ referentiel, probleme, onOuvrir, onAppliquer }) {
+  const [deplie, setDeplie] = useState(false);
+  const correctifs = useMemo(() => correctifsPour(referentiel, probleme), [referentiel, probleme]);
+
+  return (
+    <div className="rounded-lg border" style={{ borderColor: 'var(--crisis)', background: 'var(--card)' }}>
+      <div className="flex items-start gap-2 px-3 py-2 text-sm">
+        <span
+          className="mt-0.5 shrink-0 text-[11px] uppercase"
+          style={{ fontFamily: F_MONO, fontWeight: 600, color: 'var(--crisis)' }}
+        >
+          erreur
+        </span>
+        <span className="min-w-0 flex-1" style={{ color: 'var(--ink)' }}>
+          {probleme.message}
+        </span>
+        <button
+          type="button"
+          onClick={() => onOuvrir?.(probleme)}
+          className="shrink-0 rounded-lg border px-2 py-0.5 text-xs"
+          style={{ borderColor: 'var(--border)', color: 'var(--ink)' }}
+        >
+          Ouvrir
+        </button>
+        {correctifs.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setDeplie((d) => !d)}
+            aria-expanded={deplie}
+            className="shrink-0 rounded-lg border px-2 py-0.5 text-xs"
+            style={{ borderColor: 'var(--border)', color: 'var(--ink)' }}
+          >
+            {deplie ? 'Masquer' : `${correctifs.length} correctif(s)`}
+          </button>
+        )}
+      </div>
+
+      {deplie && (
+        <div className="space-y-1 border-t px-3 py-2" style={{ borderColor: 'var(--border)' }}>
+          {correctifs.map((correctif) => (
+            <button
+              key={correctif.id}
+              type="button"
+              onClick={() => onAppliquer(correctif)}
+              className="block w-full rounded-lg border px-3 py-1.5 text-left text-sm"
+              style={{ borderColor: 'var(--border)' }}
+            >
+              <span style={{ color: 'var(--ink)', fontWeight: 600 }}>{correctif.libelle}</span>
+              <span className="block text-xs" style={{ color: 'var(--ink-soft)' }}>
+                {correctif.explication}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ListeProblemes({ problemes, limite = 50, onProbleme }) {
   if (problemes.length === 0) {
     return (
@@ -1453,9 +1521,24 @@ function EcranPlanning({
           <Carte
             className="no-print"
             titre={`${aCorriger.length} créneau(x) à corriger`}
-            sousTitre="Cliquez une ligne pour ouvrir le créneau concerné"
+            sousTitre="« Ouvrir » mène au créneau ; « correctifs » propose les issues possibles"
           >
-            <ListeProblemes problemes={aCorriger} onProbleme={onProbleme} />
+            <div className="space-y-1.5">
+              {aCorriger.slice(0, 50).map((p, i) => (
+                <ProblemeACorriger
+                  key={p.cle ?? `${p.chemin}-${i}`}
+                  referentiel={referentiel}
+                  probleme={p}
+                  onOuvrir={onProbleme}
+                  onAppliquer={(correctif) => setStructure(correctif.applique(structure))}
+                />
+              ))}
+              {aCorriger.length > 50 && (
+                <p className="pt-1 text-xs" style={{ color: 'var(--ink-soft)' }}>
+                  … et {aCorriger.length - 50} autre(s).
+                </p>
+              )}
+            </div>
           </Carte>
         );
       })()}

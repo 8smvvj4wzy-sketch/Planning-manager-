@@ -51,7 +51,10 @@ chevauchent jamais : ce sont des alternatives.
 Cliquer un créneau l'ouvre et le **modifie** : horaires, salle, jeunes, éducateurs,
 suppression. Un planning importé arrive presque toujours avec de vraies collisions — deux
 activités au même moment, quelqu'un affecté deux fois : elles sont listées au-dessus de la
-grille, et cliquer l'une d'elles ouvre le créneau fautif.
+grille, et chacune propose ses **issues** — raccourcir le créneau qui déborde, retirer la
+personne de l'un ou de l'autre, supprimer l'un des deux — en disant ce que chacune
+emporte. L'application ne tranche pas : elle ne sait pas laquelle des deux activités
+compte.
 
 **Écran Période** — une situation qui dure (« Lucas absent du 14 au 19 ») projetée sur
 chaque jour d'accueil, jusqu'au **retour au fonctionnement initial** — la première date

@@ -11,6 +11,8 @@ export * from './types.ts';
 export { GrilleTemps, estHeureValide, heureEnMinutes, minutesEnHeure } from './temps.ts';
 export { Referentiel } from './referentiel.ts';
 
+export { correctifsPour, type Correctif } from './correctifs.ts';
+
 export {
   ajouteActivite,
   ajouteCreneau,
