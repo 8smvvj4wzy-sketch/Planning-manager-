@@ -713,6 +713,28 @@ peut être bien formulé et ne rien régler.
 Un correctif dont l'un des deux créneaux a déjà disparu — parce qu'on vient d'en appliquer
 un autre — rend une liste vide plutôt que de lever : c'est un état normal, pas une erreur.
 
+## 21. Fusionner deux classes : un mode d'import, pas un module
+
+Deux classes partagent le bâtiment, les journées et les salles, mais chacune a son propre
+export de tableur. Le planning complet est leur somme — et c'est seulement une fois
+réunies qu'on voit ce qui compte vraiment : qui se dispute quelle salle, à quelle heure.
+
+Le seul obstacle était que `assemble` remplaçait systématiquement les créneaux des jours
+importés. Ce comportement est le bon par défaut : on réimporte le plus souvent une version
+corrigée du même planning, et cumuler produirait des doublons. Mais il rendait la fusion
+impossible — la seconde classe effaçait la première.
+
+D'où `OptionsAssemblage.surJoursImportes` : `'remplace'` (défaut, inchangé) ou `'ajoute'`.
+Trois lignes dans le moteur, un troisième choix dans l'écran d'import, et le texte d'aide
+qui dit lequel écrase quoi. Les identifiants passaient déjà par `idUnique` : rien à faire
+de ce côté.
+
+**Rien d'autre n'était nécessaire.** Les conflits de salle entre les deux classes sont des
+chevauchements ordinaires — `verifieChevauchements` traite déjà `salleId` comme une
+ressource — et la vue « par salle » les montre, colonne « sans salle » comprise. C'était
+la décision prise avec l'utilisateur : les salles se saisissent à la main, l'application
+signale les conflits, elle ne place rien toute seule.
+
 ## 22. Garder les fichiers importés, sur ce poste seulement
 
 Un planning se reprend en plusieurs fois : on importe, on corrige, on s'interrompt, et le

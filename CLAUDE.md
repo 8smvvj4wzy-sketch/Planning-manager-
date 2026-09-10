@@ -103,6 +103,13 @@ tests et n'est jamais importé depuis `interface/`.
   durées également invérifiables, la plus courte est celle qui invente le moins de
   chevauchements. Signaler l'incertitude (`import.duree-incertaine`) ne suffit pas si la
   valeur choisie est le pire des deux extrêmes.
+- **Un second import écrase les jours du premier, sauf si on le lui interdit.**
+  `OptionsAssemblage.surJoursImportes` : `'remplace'` (défaut) est ce qu'on veut en
+  réimportant une version corrigée — sans ça, les deux se cumuleraient en doublons.
+  `'ajoute'` sert aux **deux classes** qui partagent les mêmes journées : chacune a son
+  export, et le planning complet est leur somme. Les conflits de salle entre elles
+  sortent alors tout seuls à la validation, ce qui est précisément l'intérêt de les
+  fusionner.
 - **Toute nouvelle clé de stockage va dans la liste du bouton « Vider ce poste ».**
   C'est la seule énumération des clés `planning-ime:` de l'application, et le corollaire
   du piège de collision ci-dessus : une clé oubliée là survit à un vidage sans que

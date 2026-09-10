@@ -3104,7 +3104,7 @@ function ImportTableur({ referentiel, structure, onCharge }) {
       setErreurLecture(null);
       setResolutionsJours({});
 
-      const base = mode === 'completer' && structure ? referentiel : null;
+      const base = mode !== 'remplacer' && structure ? referentiel : null;
       setCorrespondances(proposeCorrespondances(base, nomsRencontres(planning)));
     } catch (e) {
       setLu(null);
@@ -3126,7 +3126,9 @@ function ImportTableur({ referentiel, structure, onCharge }) {
       const options = {
         correspondances,
         resolutionsJours,
-        ...(mode === 'completer' && structure ? { base: structure } : {}),
+        ...(mode !== 'remplacer' && structure
+          ? { base: structure, surJoursImportes: mode === 'ajouter' ? 'ajoute' : 'remplace' }
+          : {}),
         ...(mode === 'remplacer' || !structure
           ? { metaDepart: { auteur: metaAuteur, etablissement: metaEtablissement } }
           : {}),
@@ -3250,16 +3252,20 @@ function ImportTableur({ referentiel, structure, onCharge }) {
 
             {structure && (
               <div className="w-64">
-                <Champ libelle="Par rapport à la structure chargée">
+                <Champ
+                  libelle="Par rapport à la structure chargée"
+                  aide="« Compléter » écrase les jours présents dans ce fichier — c'est ce qu'on veut en réimportant une version corrigée. « Ajouter » les conserve : deux classes qui partagent les mêmes journées."
+                >
                   <Selecteur
                     valeur={mode}
                     onChange={(v) => {
                       setMode(v);
-                      const base = v === 'completer' ? referentiel : null;
+                      const base = v !== 'remplacer' ? referentiel : null;
                       setCorrespondances(proposeCorrespondances(base, nomsRencontres(lu)));
                     }}
                     options={[
-                      { valeur: 'completer', libelle: 'Compléter (garder le reste)' },
+                      { valeur: 'completer', libelle: 'Compléter — remplacer ces jours' },
+                      { valeur: 'ajouter', libelle: 'Ajouter — 2ᵉ classe sur les mêmes jours' },
                       { valeur: 'remplacer', libelle: 'Remplacer entièrement' },
                     ]}
                   />
