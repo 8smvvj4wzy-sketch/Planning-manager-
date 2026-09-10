@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { estChargeable, valideJour, valideStructure } from '../src/index.ts';
+import {
+  Referentiel,
+  estChargeable,
+  planningTypeDuJour,
+  quinzaineDeLaDate,
+  valideJour,
+  valideStructure,
+} from '../src/index.ts';
 import type { Structure } from '../src/index.ts';
 import { jourExemple, referentielExemple, structureExemple, structureMinimale } from './aide.ts';
 
@@ -287,5 +294,90 @@ describe('validation des binômes', () => {
     s.planningType[0]!.jeunes = ['ja', 'jb'];
     const resultat = valideStructure(s);
     assert.ok(!codes(resultat.problemes).includes('creneau.sans-referent'));
+  });
+});
+
+describe('alternance semaine A / semaine B', () => {
+  /** Deux activités au même horaire, qui n'ont jamais lieu la même semaine. */
+  function avecAlternance() {
+    const s = structureMinimale();
+    s.planningType[0] = { ...s.planningType[0]!, id: 'cA', quinzaine: 'A' };
+    s.planningType.push({ ...s.planningType[0]!, id: 'cB', quinzaine: 'B', salleId: 'sb' });
+    return s;
+  }
+
+  it('ne voit pas de chevauchement entre semaine A et semaine B', () => {
+    // C'est tout l'objet du champ : ce sont des ALTERNATIVES, pas deux
+    // activités simultanées. Le mercredi d'un planning réel s'écrit ainsi.
+    const s = avecAlternance();
+    const chevauchements = valideStructure(s).problemes.filter((p) => p.code === 'creneau.chevauchement');
+    assert.deepEqual(chevauchements, []);
+  });
+
+  it('en voit un entre une semaine A et un créneau de toutes les semaines', () => {
+    // Un créneau sans quinzaine a lieu les DEUX semaines : il rencontre donc
+    // bien celui de la semaine A.
+    const s = avecAlternance();
+    s.planningType.push({ ...s.planningType[0]!, id: 'cTous', quinzaine: undefined, salleId: null });
+    delete s.planningType[2]!.quinzaine;
+
+    const messages = valideStructure(s)
+      .problemes.filter((p) => p.code === 'creneau.chevauchement')
+      .map((p) => p.message);
+    assert.ok(messages.length > 0);
+    assert.ok(messages.every((m) => m.includes('cA') || m.includes('cB') || m.includes('cTous')));
+  });
+
+  it('ne compte pas deux fois un chevauchement hebdomadaire', () => {
+    // Deux créneaux sans quinzaine sont examinés dans les DEUX passes (A et
+    // B) : sans déduplication, chaque collision sortirait en double. Ici deux
+    // personnes se chevauchent — un jeune et un éducateur — donc deux lignes,
+    // et deux seulement.
+    const s = structureMinimale();
+    s.planningType.push({ ...s.planningType[0]!, id: 'c2', salleId: 'sb' });
+    const chevauchements = valideStructure(s).problemes.filter((p) => p.code === 'creneau.chevauchement');
+
+    assert.equal(chevauchements.length, 2);
+    assert.deepEqual(
+      chevauchements.map((p) => p.message).sort(),
+      [
+        'educateur "ea" est aussi sur "c1" de 09:00 a 10:00 (lundi)',
+        'jeune "ja" est aussi sur "c1" de 09:00 a 10:00 (lundi)',
+      ],
+    );
+    const cles = chevauchements.map((p) => p.cle);
+    assert.equal(new Set(cles).size, cles.length, 'chaque constat porte une clé distincte');
+  });
+
+  it('filtre le planning type sur la semaine demandée', () => {
+    const ref = new Referentiel(avecAlternance());
+    assert.equal(ref.aDesQuinzaines, true);
+    assert.deepEqual(planningTypeDuJour(ref, 'lundi', 'A').creneaux.map((c) => c.id), ['cA']);
+    assert.deepEqual(planningTypeDuJour(ref, 'lundi', 'B').creneaux.map((c) => c.id), ['cB']);
+    assert.deepEqual(
+      planningTypeDuJour(ref, 'lundi').creneaux.map((c) => c.id),
+      ['cA', 'cB'],
+      'sans précision, les deux — ce n’est le planning d’aucune semaine, mais rien n’est caché',
+    );
+  });
+
+  it('avertit quand l alternance existe sans date de référence', () => {
+    const s = avecAlternance();
+    const codes = valideStructure(s).problemes.map((p) => p.code);
+    assert.ok(codes.includes('grille.alternance'));
+
+    s.grille.semaineAOrigine = '2026-09-14';
+    assert.ok(!valideStructure(s).problemes.map((p) => p.code).includes('grille.alternance'));
+  });
+
+  it('déduit la semaine d une date, par-dessus un changement d année', () => {
+    // Le numéro de semaine ISO casserait ici : 2026 a 53 semaines. Un écart en
+    // jours entre les lundis, non.
+    assert.equal(quinzaineDeLaDate('2026-09-14', '2026-09-14'), 'A');
+    assert.equal(quinzaineDeLaDate('2026-09-14', '2026-09-18'), 'A', 'même semaine, même réponse');
+    assert.equal(quinzaineDeLaDate('2026-09-14', '2026-09-21'), 'B');
+    assert.equal(quinzaineDeLaDate('2026-09-14', '2026-09-28'), 'A');
+    assert.equal(quinzaineDeLaDate('2026-12-28', '2027-01-04'), 'B', 'de part et d’autre du 1er janvier');
+    assert.equal(quinzaineDeLaDate('2026-09-14', '2026-09-07'), 'B', 'avant l’ancre : pas de modulo négatif');
   });
 });

@@ -173,54 +173,92 @@ describe('groupes de jours en tête de colonnes', () => {
 
 describe('contenu d une cellule', () => {
   it('sépare l activité de ses binômes', () => {
-    const lu = analyseCellule('Mand :\nOnyx / Wren\nSable / Pike')!;
-    assert.equal(lu.activite, 'Mand');
-    assert.deepEqual(lu.binomes, [
+    const [lu] = analyseCellule('Mand :\nOnyx / Wren\nSable / Pike');
+    assert.equal(lu!.activite, 'Mand');
+    assert.deepEqual(lu!.binomes, [
       { jeunes: ['Onyx'], educateurs: ['Wren'] },
       { jeunes: ['Sable'], educateurs: ['Pike'] },
     ]);
-    assert.deepEqual(lu.restes, []);
+    assert.deepEqual(lu!.restes, []);
   });
 
   it('lit un binôme posé sur la même ligne que l activité', () => {
-    const lu = analyseCellule('Protocole : Onyx / Wren')!;
-    assert.equal(lu.activite, 'Protocole');
-    assert.deepEqual(lu.binomes, [{ jeunes: ['Onyx'], educateurs: ['Wren'] }]);
+    const [lu] = analyseCellule('Protocole : Onyx / Wren');
+    assert.equal(lu!.activite, 'Protocole');
+    assert.deepEqual(lu!.binomes, [{ jeunes: ['Onyx'], educateurs: ['Wren'] }]);
   });
 
   it('lit plusieurs accompagnants pour un jeune', () => {
-    const lu = analyseCellule('Balade :\nOnyx / Wren + Pike')!;
-    assert.deepEqual(lu.binomes, [{ jeunes: ['Onyx'], educateurs: ['Wren', 'Pike'] }]);
+    const [lu] = analyseCellule('Balade :\nOnyx / Wren + Pike');
+    assert.deepEqual(lu!.binomes, [{ jeunes: ['Onyx'], educateurs: ['Wren', 'Pike'] }]);
   });
 
   it('lit plusieurs jeunes pour un même groupe d accompagnants — le bug du fichier réel', () => {
     // « Héléna + Valentin + Ilian / Camille+Callista » dans un vrai export :
     // avant le correctif, tout le côté gauche devenait UN SEUL « jeune » de
     // 26 caractères.
-    const lu = analyseCellule('Petit groupe :\nOnyx + Sable + Pike / Wren+Lumen')!;
-    assert.deepEqual(lu.binomes, [{ jeunes: ['Onyx', 'Sable', 'Pike'], educateurs: ['Wren', 'Lumen'] }]);
+    const [lu] = analyseCellule('Petit groupe :\nOnyx + Sable + Pike / Wren+Lumen');
+    assert.deepEqual(lu!.binomes, [{ jeunes: ['Onyx', 'Sable', 'Pike'], educateurs: ['Wren', 'Lumen'] }]);
   });
 
   it('lit plusieurs jeunes même sans espace autour du +', () => {
-    const lu = analyseCellule('Scolaire :\nOnyx+Sable / Wren')!;
-    assert.deepEqual(lu.binomes, [{ jeunes: ['Onyx', 'Sable'], educateurs: ['Wren'] }]);
+    const [lu] = analyseCellule('Scolaire :\nOnyx+Sable / Wren');
+    assert.deepEqual(lu!.binomes, [{ jeunes: ['Onyx', 'Sable'], educateurs: ['Wren'] }]);
   });
 
   it('accepte une activité collective sans binôme', () => {
-    const lu = analyseCellule('Repas')!;
-    assert.equal(lu.activite, 'Repas');
-    assert.deepEqual(lu.binomes, []);
+    const [lu] = analyseCellule('Repas');
+    assert.equal(lu!.activite, 'Repas');
+    assert.deepEqual(lu!.binomes, []);
   });
 
   it('met de côté ce qu il ne sait pas lire, plutôt que de l inventer', () => {
-    const lu = analyseCellule('Détaché :\nWren (pas dispo)')!;
-    assert.equal(lu.activite, 'Détaché');
-    assert.deepEqual(lu.binomes, []);
-    assert.deepEqual(lu.restes, ['Wren (pas dispo)']);
+    const [lu] = analyseCellule('Détaché :\nWren (pas dispo)');
+    assert.equal(lu!.activite, 'Détaché');
+    assert.deepEqual(lu!.binomes, []);
+    assert.deepEqual(lu!.restes, ['Wren (pas dispo)']);
   });
 
-  it('rend null sur une cellule vide', () => {
-    assert.equal(analyseCellule('   \n  '), null);
+  it('ne rend aucun bloc sur une cellule vide', () => {
+    assert.deepEqual(analyseCellule('   \n  '), []);
+  });
+
+  it('découpe une cellule qui porte DEUX activités — le cas du mercredi réel', () => {
+    // Le fichier écrit les deux semaines dans une seule case. Les fondre en un
+    // créneau mettait Wren et Pike ensemble, et la validation y voyait un
+    // conflit qui n'existe pas : ce sont des alternatives.
+    const blocs = analyseCellule('Protocole Semaine A:\nOnyx / Wren\n\nProtocole Semaine B:\nOnyx / Pike');
+    assert.equal(blocs.length, 2);
+    assert.equal(blocs[0]!.activite, 'Protocole');
+    assert.equal(blocs[0]!.quinzaine, 'A');
+    assert.deepEqual(blocs[0]!.binomes, [{ jeunes: ['Onyx'], educateurs: ['Wren'] }]);
+    assert.equal(blocs[1]!.quinzaine, 'B');
+    assert.deepEqual(blocs[1]!.binomes, [{ jeunes: ['Onyx'], educateurs: ['Pike'] }]);
+  });
+
+  it('retire le marqueur de semaine du nom de l activité', () => {
+    const [lu] = analyseCellule('Scolaire semaine B :\nOnyx / Wren');
+    assert.equal(lu!.activite, 'Scolaire');
+    assert.equal(lu!.quinzaine, 'B');
+  });
+
+  it('reprend le nom sur la ligne suivante quand le titre n était que le marqueur', () => {
+    // « Semaine A :\nMotricité fine + Tartinage\nHabib / Callista » : le vrai
+    // nom de l'activité est en dessous.
+    const [lu] = analyseCellule('Semaine A :\nMotricité fine + Tartinage\nOnyx / Wren');
+    assert.equal(lu!.activite, 'Motricité fine + Tartinage');
+    assert.equal(lu!.quinzaine, 'A');
+    assert.deepEqual(lu!.restes, []);
+  });
+
+  it('ne baptise pas une activité du nom d une personne', () => {
+    // « Détache:\nAngie\nSemaine A :\nCamille » — aucun binôme dans le second
+    // bloc : reprendre le premier reste nommerait l'activité « Camille ».
+    const blocs = analyseCellule('Détaché:\nWren\nSemaine A :\nPike');
+    assert.equal(blocs.length, 2);
+    assert.equal(blocs[1]!.quinzaine, 'A');
+    assert.equal(blocs[1]!.activite, 'Détaché', 'il hérite du bloc au-dessus, il n’invente pas');
+    assert.deepEqual(blocs[1]!.restes, ['Pike'], 'Pike reste une personne, pas un nom d’activité');
   });
 });
 

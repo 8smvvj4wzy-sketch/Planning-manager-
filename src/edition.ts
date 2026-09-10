@@ -31,6 +31,7 @@ import type {
   Heure,
   Jeune,
   Jour,
+  Quinzaine,
   Salle,
   Structure,
 } from './types.ts';
@@ -89,6 +90,12 @@ export function structureVierge(depart: DepartVierge): Structure {
  */
 export interface ChangementCreneau {
   jour?: Jour;
+  /**
+   * Alternance une semaine sur deux. `null` la RETIRE — le creneau redevient
+   * hebdomadaire. Sans ce sentinel, « toutes les semaines » serait indistinct
+   * de « ne touche pas a ce champ ».
+   */
+  quinzaine?: Quinzaine | null;
   debut?: Heure;
   /** Duree en nombre de pas. */
   pas?: number;
@@ -154,6 +161,11 @@ export function modifieCreneau(
     educateurs,
     ...(affectations ? { affectations } : {}),
   };
+
+  if (changement.quinzaine !== undefined) {
+    if (changement.quinzaine === null) delete modifie.quinzaine;
+    else modifie.quinzaine = changement.quinzaine;
+  }
 
   return {
     ...structure,

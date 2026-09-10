@@ -321,7 +321,12 @@ export function assemble(planningLu: PlanningLu, options: OptionsAssemblage): Re
       }
     }
 
-    const id = idUnique(`${jour}-${creneau.debut}-${creneau.activite}`, idsCreneauxConnus);
+    // La quinzaine entre dans l'identifiant : sans elle, « Protocole semaine A »
+    // et « Protocole semaine B », meme jour et meme heure, se telescopent.
+    const id = idUnique(
+      `${jour}-${creneau.debut}-${creneau.activite}${creneau.quinzaine ? `-${creneau.quinzaine}` : ''}`,
+      idsCreneauxConnus,
+    );
     idsCreneauxConnus.add(id);
 
     if (jeunesIds.length === 0 && educateursIds.length === 0) {
@@ -359,6 +364,7 @@ export function assemble(planningLu: PlanningLu, options: OptionsAssemblage): Re
     nouveauxCreneaux.push({
       id,
       jour,
+      ...(creneau.quinzaine ? { quinzaine: creneau.quinzaine } : {}),
       debut: creneau.debut,
       pas,
       activiteId,

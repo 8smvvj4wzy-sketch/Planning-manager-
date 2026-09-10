@@ -4,9 +4,10 @@
  */
 
 import { retireDesBinomes } from '../affectations.ts';
+import { quinzaineDeLaDate } from '../dates.ts';
 import { jeunePresent, type EtatJour } from '../moteur/etatJour.ts';
 import type { Referentiel } from '../referentiel.ts';
-import type { CreneauType, Jour } from '../types.ts';
+import type { CreneauType, Jour, Quinzaine } from '../types.ts';
 import { Planning, type Creneau, type OrigineCreneau } from './planning.ts';
 
 function versCreneau(
@@ -33,11 +34,31 @@ function versCreneau(
   };
 }
 
-/** Planning type d'un jour, sans aucune prise en compte des absences. */
-export function planningTypeDuJour(ref: Referentiel, jour: Jour): Planning {
+/**
+ * Quelle semaine de l'alternance tombe ce jour-la.
+ *
+ * `null` quand la question ne se pose pas — pas de date, ou pas d'ancre posee
+ * dans la grille. Dans ce dernier cas les creneaux des deux semaines ressortent
+ * ensemble : la validation le signale (`grille.alternance`) plutot que de
+ * choisir une semaine au hasard.
+ */
+export function quinzaineDuJour(ref: Referentiel, etat: EtatJour): Quinzaine | undefined {
+  const origine = ref.structure.grille.semaineAOrigine;
+  if (!etat.date || !origine) return undefined;
+  return quinzaineDeLaDate(origine, etat.date);
+}
+
+/**
+ * Planning type d'un jour, sans aucune prise en compte des absences.
+ *
+ * `quinzaine` filtre l'alternance une semaine sur deux ; l'omettre rend TOUT,
+ * semaine A et semaine B confondues — ce qui n'est un planning reel d'aucune
+ * semaine, mais reste la bonne reponse quand personne n'a precise laquelle.
+ */
+export function planningTypeDuJour(ref: Referentiel, jour: Jour, quinzaine?: Quinzaine): Planning {
   return new Planning(
     jour,
-    ref.creneauxTypeDuJour(jour).map((c) => versCreneau(ref, c, 'planning-type', false)),
+    ref.creneauxTypeDuJour(jour, quinzaine).map((c) => versCreneau(ref, c, 'planning-type', false)),
   );
 }
 
@@ -49,7 +70,7 @@ export function planningTypeDuJour(ref: Referentiel, jour: Jour): Planning {
  * point de depart. Le cout des changements se mesure par rapport a ce planning-ci.
  */
 export function planningInitial(ref: Referentiel, etat: EtatJour): Planning {
-  const planning = planningTypeDuJour(ref, etat.jour);
+  const planning = planningTypeDuJour(ref, etat.jour, quinzaineDuJour(ref, etat));
 
   for (const creneau of planning.creneaux) {
     const pas = Array.from({ length: creneau.pas }, (_, i) => creneau.pasDebut + i);

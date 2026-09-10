@@ -1059,6 +1059,20 @@ function DetailCreneau({
                   options={heures(creneau.pasDebut + 1, grille.nbPas)}
                 />
               </Champ>
+              <Champ
+                libelle="Semaine"
+                aide="« Toutes » : le créneau a lieu chaque semaine. A ou B : une semaine sur deux."
+              >
+                <Selecteur
+                  valeur={dansStructure.quinzaine ?? ''}
+                  onChange={(v) => appliquer({ quinzaine: v === '' ? null : v })}
+                  options={[
+                    { valeur: '', libelle: 'Toutes les semaines' },
+                    { valeur: 'A', libelle: 'Semaine A' },
+                    { valeur: 'B', libelle: 'Semaine B' },
+                  ]}
+                />
+              </Champ>
             </div>
           )}
 
@@ -1213,6 +1227,8 @@ function EcranPlanning({
   onProbleme,
   personneSuivie,
   setPersonneSuivie,
+  quinzaine,
+  setQuinzaine,
 }) {
 
   /* Deux plannings possibles : le planning type d'un jour de la semaine (la
@@ -1221,9 +1237,14 @@ function EcranPlanning({
   const journee = resultat?.journees.find((j) => j.date === dateAffichee) ?? null;
   const montreReparation = source === 'reparation' && journee;
 
+  /* La semaine choisie ne filtre que le planning TYPE : une journée analysée
+     est datée, c'est la date qui décide de sa quinzaine, pas ce sélecteur. */
   const planning = useMemo(
-    () => (montreReparation ? journee.reparation.planning : planningTypeDuJour(referentiel, jourAffiche)),
-    [montreReparation, journee, referentiel, jourAffiche],
+    () =>
+      montreReparation
+        ? journee.reparation.planning
+        : planningTypeDuJour(referentiel, jourAffiche, quinzaine ?? undefined),
+    [montreReparation, journee, referentiel, jourAffiche, quinzaine],
   );
 
   const jourDuPlanning = montreReparation ? journee.jour : jourAffiche;
@@ -1343,6 +1364,21 @@ function EcranPlanning({
             <Selecteur valeur={axe} onChange={setAxe} options={AFFICHAGES} />
           </Champ>
         </div>
+        {referentiel.aDesQuinzaines && !montreReparation && (
+          <div className="w-44">
+            <Champ libelle="Semaine">
+              <Selecteur
+                valeur={quinzaine ?? ''}
+                onChange={(v) => setQuinzaine(v === '' ? null : v)}
+                options={[
+                  { valeur: '', libelle: 'Les deux' },
+                  { valeur: 'A', libelle: 'Semaine A' },
+                  { valeur: 'B', libelle: 'Semaine B' },
+                ]}
+              />
+            </Champ>
+          </div>
+        )}
         {estFiche(axe) && (
           <div className="w-52">
             <Champ libelle={axe === 'jeune' ? 'Jeune suivi' : 'Éducateur suivi'}>
@@ -2667,6 +2703,32 @@ function EcranStructure({ referentiel, structure, setStructure }) {
             ? 'aucune'
             : s.grille.pauses.map((p) => `${p.libelle} ${p.debut} (${p.pas} pas)`).join(' · ')}
         </p>
+
+        {/* L'ancre ne se demande que si l'alternance existe : sur un planning
+            hebdomadaire, ce champ n'aurait rien à ancrer. */}
+        {referentiel.aDesQuinzaines && (
+          <div className="mt-3 max-w-xs">
+            <Champ
+              libelle="Semaine A à partir du"
+              aide="La semaine contenant cette date est une semaine A ; l’alternance se déduit ensuite. Sans elle, une analyse datée mélange A et B."
+            >
+              <input
+                type="date"
+                className="w-full rounded-xl border px-3 py-2 text-sm"
+                style={styleSaisie}
+                value={s.grille.semaineAOrigine ?? ''}
+                onChange={(e) =>
+                  setStructure({
+                    ...s,
+                    grille: e.target.value
+                      ? { ...s.grille, semaineAOrigine: e.target.value }
+                      : (({ semaineAOrigine, ...reste }) => reste)(s.grille),
+                  })
+                }
+              />
+            </Champ>
+          </div>
+        )}
       </Carte>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -3929,6 +3991,9 @@ export default function App() {
      ouvre par défaut. */
   const [axe, setAxe] = useState('activite');
   const [personneSuivie, setPersonneSuivie] = useState(null);
+  /* `null` = les deux semaines ensemble : ce n'est le planning réel d'aucune
+     semaine, mais c'est la bonne réponse tant que personne n'a choisi. */
+  const [quinzaine, setQuinzaine] = useState(null);
   /* Le créneau ouvert vit ici, pas dans l'écran Planning : une erreur de
      validation cliquée depuis n'importe quel écran doit pouvoir l'ouvrir. */
   const [creneauOuvert, setCreneauOuvert] = useState(null);
@@ -4185,6 +4250,8 @@ export default function App() {
         onProbleme={ouvrirProbleme}
         personneSuivie={personneSuivie}
         setPersonneSuivie={setPersonneSuivie}
+        quinzaine={quinzaine}
+        setQuinzaine={setQuinzaine}
       />
     ) : (
       <Vide>La grille de cette structure ne déclare aucun jour d’accueil.</Vide>

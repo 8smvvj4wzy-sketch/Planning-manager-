@@ -7,7 +7,7 @@
  * instants.
  */
 
-import type { DateIso } from './types.ts';
+import type { DateIso, Quinzaine } from './types.ts';
 
 const FORMAT = /^(\d{4})-(\d{2})-(\d{2})$/;
 
@@ -67,4 +67,26 @@ export function cleSemaineIso(date: DateIso): string {
   const premierJanvier = Date.UTC(annee, 0, 1);
   const semaine = Math.floor((jeudi.getTime() - premierJanvier) / 86_400_000 / 7) + 1;
   return `${annee}-W${String(semaine).padStart(2, '0')}`;
+}
+
+/** Le lundi de la semaine contenant cette date. */
+export function lundiDeLaSemaine(date: DateIso): DateIso {
+  const t = enTimestamp(date);
+  const jour = (new Date(t).getUTCDay() + 6) % 7; // 0 = lundi
+  return depuisUTC(t - jour * 86_400_000);
+}
+
+/**
+ * Semaine A ou B pour une date, a partir de l'ancre posee dans la grille.
+ *
+ * Compare les LUNDIS des deux semaines et prend la parite de l'ecart. Pas le
+ * numero de semaine ISO : une annee a parfois 53 semaines, et l'alternance se
+ * retournerait toute seule au changement d'annee. Un ecart en jours, lui, ne
+ * ment jamais — c'est aussi pour ca que ce module est entierement en UTC.
+ */
+export function quinzaineDeLaDate(origine: DateIso, date: DateIso): Quinzaine {
+  const ecartJours = (enTimestamp(lundiDeLaSemaine(date)) - enTimestamp(lundiDeLaSemaine(origine))) / 86_400_000;
+  const semaines = Math.round(ecartJours / 7);
+  // `%` garde le signe en JS : une date anterieure a l'ancre donnerait -1.
+  return ((semaines % 2) + 2) % 2 === 0 ? 'A' : 'B';
 }

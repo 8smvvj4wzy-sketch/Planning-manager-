@@ -34,7 +34,7 @@
  */
 
 import { normaliseNom } from './identifiants.ts';
-import { JOURS, type Jour } from '../types.ts';
+import { JOURS, type Jour, type Quinzaine } from '../types.ts';
 
 /* ==================== Encodage ==================== */
 
@@ -273,6 +273,8 @@ export interface BinomeLu {
 export interface CelluleLue {
   /** Ce qui precede les deux-points, ou la cellule entiere si elle n'en a pas. */
   activite: string;
+  /** Lue dans le nom : « Protocole Semaine A » -> « Protocole », quinzaine A. */
+  quinzaine?: Quinzaine;
   binomes: BinomeLu[];
   /** Lignes qu'on n'a pas su lire comme un binome : « Angie (pas dispo) ». */
   restes: string[];
@@ -291,62 +293,116 @@ function scindePersonnes(texte: string): string[] {
 }
 
 /**
+ * Marqueur de quinzaine dans un nom d'activite : « Semaine A », « semaine b ».
+ *
+ * Le rendre optionnel dans le nom lui-meme plutot que dans une colonne a part
+ * n'est pas un choix : c'est ainsi que le planning d'origine l'ecrit.
+ */
+const MARQUEUR_QUINZAINE = /\bsemaine\s*([AB])\b/i;
+
+function extraitQuinzaine(nom: string): { nom: string; quinzaine: Quinzaine | undefined } {
+  const m = MARQUEUR_QUINZAINE.exec(nom);
+  if (!m) return { nom, quinzaine: undefined };
+  return {
+    nom: nettoie(nom.replace(MARQUEUR_QUINZAINE, ' ').replace(/^[\s:·—-]+|[\s:·—-]+$/g, '')),
+    quinzaine: m[1]!.toUpperCase() as Quinzaine,
+  };
+}
+
+/** Une ligne qui porte un `:` sans `/` ouvre un nouveau bloc : c'est un titre. */
+function estUnTitre(ligne: string): boolean {
+  return ligne.includes(':') && !ligne.includes('/');
+}
+
+/**
  * « Mand :\nValentin / Simon\nHabib / Agathe » →
- *   activite « Mand », binomes [Valentin/Simon, Habib/Agathe].
+ *   un bloc, activite « Mand », binomes [Valentin/Simon, Habib/Agathe].
  *
  * « Helena + Valentin + Ilian / Camille+Callista » → un seul binome,
  *   jeunes [Helena, Valentin, Ilian], educateurs [Camille, Callista] : le
  *   groupe entier est accompagne par l'ensemble des educateurs listes,
  *   pas apparie un a un.
  *
+ * UNE CELLULE PEUT EN CONTENIR PLUSIEURS. Le fichier reel ecrit
+ * « Protocole Semaine A:\nAdiyan / Sabrina\n\nProtocole Semaine B:\nAdiyan /
+ * Agathe » dans une seule case : deux semaines, deux activites. Les fondre en
+ * une seule mettait Sabrina et Agathe sur le meme creneau, et la validation y
+ * voyait un conflit qui n'existe pas. Chaque ligne qui porte un `:` sans `/`
+ * ouvre donc un bloc.
+ *
  * L'ordre `Jeune(s) / Educateur(s)` est celui du planning d'origine ; il est
  * pose ici et l'ecran de correspondance permet de le corriger si un fichier
  * fait l'inverse.
  */
-export function analyseCellule(brut: string): CelluleLue | null {
+export function analyseCellule(brut: string): CelluleLue[] {
   const lignes = brut
     .split('\n')
     .map(nettoie)
     .filter((l) => l !== '');
-  if (lignes.length === 0) return null;
+  if (lignes.length === 0) return [];
 
-  let activite = '';
-  const binomes: BinomeLu[] = [];
-  const restes: string[] = [];
+  const blocs: CelluleLue[] = [];
+  let courant: CelluleLue | null = null;
+
+  const ouvre = (titre: string): string => {
+    const { nom, quinzaine } = extraitQuinzaine(titre);
+    courant = { activite: nom, binomes: [], restes: [], ...(quinzaine ? { quinzaine } : {}) };
+    blocs.push(courant);
+    return nom;
+  };
 
   lignes.forEach((ligne, index) => {
     let contenu = ligne;
 
-    // Les deux-points de la premiere ligne portent le nom de l'activite. La
-    // suite de cette meme ligne peut deja etre un binome : « Protocole :
-    // Adiyan / Camille » tient sur une seule ligne.
-    if (index === 0) {
+    if (index === 0 || estUnTitre(ligne)) {
       const coupe = ligne.indexOf(':');
       if (coupe >= 0) {
-        activite = nettoie(ligne.slice(0, coupe));
+        ouvre(nettoie(ligne.slice(0, coupe)));
         contenu = nettoie(ligne.slice(coupe + 1));
       } else {
-        activite = ligne;
+        ouvre(ligne);
         contenu = '';
       }
     }
 
-    if (contenu === '') return;
+    if (contenu === '' || !courant) return;
 
     const parts = contenu.split('/');
     if (parts.length < 2) {
-      restes.push(contenu);
+      courant.restes.push(contenu);
       return;
     }
 
     const jeunes = scindePersonnes(parts[0]!);
     const educateurs = scindePersonnes(parts.slice(1).join('/'));
 
-    if (jeunes.length === 0 || educateurs.length === 0) restes.push(contenu);
-    else binomes.push({ jeunes, educateurs });
+    if (jeunes.length === 0 || educateurs.length === 0) courant.restes.push(contenu);
+    else courant.binomes.push({ jeunes, educateurs });
   });
 
-  return { activite, binomes, restes };
+  /* Un titre reduit au seul marqueur ne nomme rien : « Semaine A : ». Deux
+     replis, dans cet ordre.
+
+     1. « Semaine A :\nMotricite fine + Tartinage\nHabib / Callista » — le vrai
+        nom est sur la ligne suivante. On le prend, mais SEULEMENT si le bloc
+        porte des binomes : sinon on baptiserait l'activite du nom d'une
+        personne.
+     2. « Detache:\nAngie\nSemaine A :\nCamille » — la cellule entiere parle du
+        detachement, la semaine A n'en est qu'une declinaison. Le bloc herite du
+        dernier nom rencontre au-dessus de lui.
+
+     Sans le second repli, ces blocs ressortaient sans nom et l'assemblage les
+     appelait « (sans nom) » : exact, mais inexploitable a l'ecran. */
+  let dernierNom = '';
+  for (const bloc of blocs) {
+    if (bloc.activite === '' && bloc.binomes.length > 0 && bloc.restes.length > 0) {
+      bloc.activite = bloc.restes.shift()!;
+    }
+    if (bloc.activite === '') bloc.activite = dernierNom;
+    else dernierNom = bloc.activite;
+  }
+
+  return blocs;
 }
 
 /* ==================== Lecture d'un tableau entier ==================== */
@@ -373,6 +429,8 @@ export interface CreneauLu {
    */
   finDeduite: boolean;
   activite: string;
+  /** Alternance lue dans le nom de l'activite, si elle en portait une. */
+  quinzaine?: Quinzaine;
   binomes: BinomeLu[];
   restes: string[];
 }
@@ -486,8 +544,8 @@ export function litPlanning(table: readonly (readonly string[])[]): PlanningLu {
 
     for (let r = 0; r < rangees.length; r++) {
       const brut = table[rangees[r]!.ligne]?.[col] ?? '';
-      const cellule = analyseCellule(brut);
-      if (!cellule) continue;
+      const blocs = analyseCellule(brut);
+      if (blocs.length === 0) continue;
 
       // Cellule fusionnee : elle court jusqu'a la prochaine rangee qui porte
       // quelque chose. Les rangees muettes ne bornent rien, elles sont
@@ -498,16 +556,21 @@ export function litPlanning(table: readonly (readonly string[])[]): PlanningLu {
       while (suivante < rangees.length && muettes[suivante]) suivante++;
       const finTrouvee = suivante < rangees.length;
 
-      creneaux.push({
-        couloir: col,
-        jour: jourDuCouloir,
-        debut: rangees[r]!.heure,
-        fin: finTrouvee ? rangees[suivante]!.heure : (rangees[r + 1]?.heure ?? fin),
-        finDeduite: !finTrouvee,
-        activite: cellule.activite,
-        binomes: cellule.binomes,
-        restes: cellule.restes,
-      });
+      // Une cellule peut porter plusieurs activites : elles partagent le
+      // couloir et les bornes, et ne different que par leur contenu.
+      for (const bloc of blocs) {
+        creneaux.push({
+          couloir: col,
+          jour: jourDuCouloir,
+          debut: rangees[r]!.heure,
+          fin: finTrouvee ? rangees[suivante]!.heure : (rangees[r + 1]?.heure ?? fin),
+          finDeduite: !finTrouvee,
+          activite: bloc.activite,
+          ...(bloc.quinzaine ? { quinzaine: bloc.quinzaine } : {}),
+          binomes: bloc.binomes,
+          restes: bloc.restes,
+        });
+      }
     }
   }
 

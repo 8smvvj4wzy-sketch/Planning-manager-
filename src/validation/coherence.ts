@@ -10,7 +10,7 @@ import { comparerDates } from '../dates.ts';
 import { finDeLaPeriode } from '../moteur/periode.ts';
 import { jourDeLaDate } from '../moteur/etatJour.ts';
 import { heureEnMinutes } from '../temps.ts';
-import type { FichierJour, FichierPeriode, Structure } from '../types.ts';
+import type { FichierJour, FichierPeriode, Jour, Structure } from '../types.ts';
 import { avertissement, erreur, type Probleme } from './resultat.ts';
 
 function doublons(ids: readonly string[]): string[] {
@@ -125,6 +125,21 @@ function verifieReferences(ref: Referentiel): Probleme[] {
 function verifiePlanningType(ref: Referentiel): Probleme[] {
   const problemes: Probleme[] = [];
   const { structure } = ref;
+
+  /* Des creneaux alternent une semaine sur deux, mais rien ne dit QUELLE
+     semaine tombe a quelle date : une analyse datee melangerait A et B, et
+     rendrait un planning qui n'a lieu aucune semaine. Non bloquant — le
+     planning type, lui, se lit tres bien semaine par semaine. */
+  if (ref.aDesQuinzaines && !structure.grille.semaineAOrigine) {
+    problemes.push(
+      avertissement(
+        'grille.alternance',
+        '/grille/semaineAOrigine',
+        "des creneaux n'ont lieu qu'une semaine sur deux, mais aucune date de reference n'est posee : " +
+          'les analyses datees melangeront semaine A et semaine B',
+      ),
+    );
+  }
 
   structure.planningType.forEach((creneau, i) => {
     const base = `/planningType/${i}`;
@@ -300,60 +315,77 @@ function verifieAffectations(ref: Referentiel): Probleme[] {
  */
 function verifieChevauchements(ref: Referentiel): Probleme[] {
   const problemes: Probleme[] = [];
+  /**
+   * Une collision = un creneau, un autre creneau, une personne. Les pas s'y
+   * accumulent en Set : deux creneaux SANS quinzaine sont examines dans les
+   * deux passes ci-dessous et ne doivent etre signales qu'une fois.
+   */
+  const collisions = new Map<
+    string,
+    { index: number; libelle: string; id: string; autre: string; jour: Jour; pas: Set<number> }
+  >();
 
   for (const jour of ref.structure.grille.jours) {
-    const creneaux = ref.creneauxTypeDuJour(jour);
-    const occupation = {
-      jeunes: new Map<string, Map<number, string>>(),
-      educateurs: new Map<string, Map<number, string>>(),
-      salles: new Map<string, Map<number, string>>(),
-    };
-    /** Une collision = un creneau, un autre creneau, une personne. Les pas s'y accumulent. */
-    const collisions = new Map<string, { index: number; libelle: string; id: string; autre: string; pas: number[] }>();
+    // Deux passes : ce qui a lieu en semaine A (quinzaine A + creneaux de
+    // toutes les semaines), puis en semaine B. Un creneau A et un creneau B au
+    // meme horaire ne se rencontrent jamais — ce sont des ALTERNATIVES, pas un
+    // chevauchement. Les confondre transformait l'alternance d'un mercredi
+    // reel en conflits insolubles.
+    for (const quinzaine of ['A', 'B'] as const) {
+      const occupation = {
+        jeunes: new Map<string, Map<number, string>>(),
+        educateurs: new Map<string, Map<number, string>>(),
+        salles: new Map<string, Map<number, string>>(),
+      };
 
-    for (const creneau of creneaux) {
-      const index = ref.structure.planningType.indexOf(creneau);
-      const pas = ref.grille.pasDeCreneau(creneau.debut, creneau.pas);
-      const entrees: [keyof typeof occupation, string[], string][] = [
-        ['jeunes', creneau.jeunes, 'jeune'],
-        ['educateurs', creneau.educateurs, 'educateur'],
-        ['salles', creneau.salleId ? [creneau.salleId] : [], 'salle'],
-      ];
+      for (const creneau of ref.creneauxTypeDuJour(jour, quinzaine)) {
+        const index = ref.structure.planningType.indexOf(creneau);
+        const pas = ref.grille.pasDeCreneau(creneau.debut, creneau.pas);
+        const entrees: [keyof typeof occupation, string[], string][] = [
+          ['jeunes', creneau.jeunes, 'jeune'],
+          ['educateurs', creneau.educateurs, 'educateur'],
+          ['salles', creneau.salleId ? [creneau.salleId] : [], 'salle'],
+        ];
 
-      for (const [table, ids, libelle] of entrees) {
-        for (const id of ids) {
-          const parPas = occupation[table].get(id) ?? new Map<number, string>();
-          for (const p of pas) {
-            const autre = parPas.get(p);
-            if (autre && autre !== creneau.id) {
-              const cle = `${table}|${id}|${creneau.id}|${autre}`;
-              const collision = collisions.get(cle) ?? { index, libelle, id, autre, pas: [] };
-              collision.pas.push(p);
-              collisions.set(cle, collision);
-            } else {
-              parPas.set(p, creneau.id);
+        for (const [table, ids, libelle] of entrees) {
+          for (const id of ids) {
+            const parPas = occupation[table].get(id) ?? new Map<number, string>();
+            for (const p of pas) {
+              const autre = parPas.get(p);
+              if (autre && autre !== creneau.id) {
+                const cle = `${table}|${id}|${creneau.id}|${autre}`;
+                const collision = collisions.get(cle) ?? { index, libelle, id, autre, jour, pas: new Set<number>() };
+                collision.pas.add(p);
+                collisions.set(cle, collision);
+              } else {
+                parPas.set(p, creneau.id);
+              }
             }
+            occupation[table].set(id, parPas);
           }
-          occupation[table].set(id, parPas);
         }
       }
     }
+  }
 
-    for (const { index, libelle, id, autre, pas } of collisions.values()) {
-      const premier = Math.min(...pas);
-      const dernier = Math.max(...pas);
-      const quand =
-        premier === dernier
-          ? `a ${ref.grille.heureDePas(premier)}`
-          : `de ${ref.grille.heureDePas(premier)} a ${ref.grille.heureDePas(dernier + 1)}`;
-      problemes.push(
-        erreur(
-          'creneau.chevauchement',
-          `/planningType/${index}`,
-          `${libelle} "${id}" est aussi sur "${autre}" ${quand} (${jour})`,
-        ),
-      );
-    }
+  for (const [cle, { index, libelle, id, autre, jour, pas }] of collisions) {
+    const premier = Math.min(...pas);
+    const dernier = Math.max(...pas);
+    const quand =
+      premier === dernier
+        ? `a ${ref.grille.heureDePas(premier)}`
+        : `de ${ref.grille.heureDePas(premier)} a ${ref.grille.heureDePas(dernier + 1)}`;
+    problemes.push({
+      // `cle` identifie le constat sous-jacent, pas la ligne affichee : c'est
+      // par elle qu'on retrouve la collision pour en proposer un correctif,
+      // sans avoir a relire le message.
+      ...erreur(
+        'creneau.chevauchement',
+        `/planningType/${index}`,
+        `${libelle} "${id}" est aussi sur "${autre}" ${quand} (${jour})`,
+      ),
+      cle,
+    });
   }
   return problemes;
 }

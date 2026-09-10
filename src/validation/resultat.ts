@@ -9,6 +9,15 @@ export interface Probleme {
   /** Chemin JSON Pointer vers l'endroit fautif, ex. "/planningType/3/educateurs". */
   chemin: string;
   message: string;
+  /**
+   * Identifiant stable du CONSTAT sous-jacent, quand il en existe un.
+   *
+   * Le message est fait pour etre lu, pas analyse : y chercher de quels
+   * creneaux vient une collision serait fragile. Cette cle, elle, tient d'un
+   * rendu a l'autre, et c'est par elle qu'on retrouve le probleme pour en
+   * proposer un correctif.
+   */
+  cle?: string;
 }
 
 export interface Resultat {

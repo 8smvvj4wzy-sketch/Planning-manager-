@@ -97,6 +97,8 @@ export {
   dateDansIntervalle,
   dateSuivante,
   estDateValide,
+  lundiDeLaSemaine,
+  quinzaineDeLaDate,
 } from './dates.ts';
 export {
   auditeSemaine,

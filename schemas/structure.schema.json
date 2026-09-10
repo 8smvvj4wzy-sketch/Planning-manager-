@@ -178,6 +178,10 @@
         "fin": {
           "$ref": "#/$defs/heure"
         },
+        "semaineAOrigine": {
+          "description": "La semaine contenant cette date est une semaine A. Tout le reste de l'alternance s'en deduit par parite. Absente : l'alternance n'est pas datable.",
+          "$ref": "#/$defs/dateIso"
+        },
         "pauses": {
           "type": "array",
           "items": {
@@ -409,6 +413,14 @@
         },
         "jour": {
           "$ref": "#/$defs/jour"
+        },
+        "quinzaine": {
+          "description": "Ce creneau n'a lieu qu'une semaine sur deux. Absent : toutes les semaines.",
+          "type": "string",
+          "enum": [
+            "A",
+            "B"
+          ]
         },
         "debut": {
           "$ref": "#/$defs/heure"
