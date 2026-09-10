@@ -12,15 +12,26 @@ export { GrilleTemps, estHeureValide, heureEnMinutes, minutesEnHeure } from './t
 export { Referentiel } from './referentiel.ts';
 
 export {
+  ajouteActivite,
   ajouteCreneau,
+  ajouteEducateur,
+  ajouteJeune,
   ajouteSalle,
+  modifieActivite,
   modifieCreneau,
+  modifieEducateur,
+  modifieJeune,
   modifieSalle,
   retireDuCreneau,
+  structureVierge,
+  supprimeActivite,
   supprimeCreneau,
+  supprimeEducateur,
+  supprimeJeune,
   supprimeSalle,
   termineCreneauA,
   type ChangementCreneau,
+  type DepartVierge,
 } from './edition.ts';
 
 export {

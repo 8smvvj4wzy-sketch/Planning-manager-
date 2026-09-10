@@ -65,9 +65,14 @@ jeune, éducateur, ou à ignorer — avant que quoi que ce soit ne soit chargé 
 dit « Marie Dupont », jamais `e1`.
 
 **Écran Règles** — activer, pondérer, régler la portée (`presence` / `binome`) des
-règles chargées. **Écran Structure** — ce que la structure chargée contient, en lecture,
-plus la saisie des **salles** : un planning de tableur n'en nomme jamais, elles n'ont
-pas d'autre endroit où exister.
+règles chargées. **Écran Structure** — jeunes, éducateurs, activités et salles s'y
+**saisissent** ; présences, disponibilités et groupes restent en lecture, ils viennent du
+fichier.
+
+**Commencer sans fichier.** Trois entrées : déposer un `structure.json`, coller un
+planning de tableur, ou **partir d'une grille vide** — jours d'accueil, horaires, pas, et
+tout se saisit ensuite à la main. L'application reste livrée vierge : c'est vous qui
+remplissez, rien n'est embarqué.
 **Écran Réglages** — les arbitrages du moteur (priorité de réparation, détachement,
 encadrement), le thème, le stockage local.
 

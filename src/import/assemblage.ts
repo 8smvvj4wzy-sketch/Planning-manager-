@@ -23,6 +23,7 @@
  * (`valideStructure`) comme n'importe quel fichier.
  */
 
+import { structureVierge } from '../edition.ts';
 import { avertissement, type Probleme } from '../validation/resultat.ts';
 import type {
   Affectation,
@@ -72,29 +73,13 @@ export interface ResultatAssemblage {
  * creneaux un par un.
  */
 function structureVide(meta: MetaDepart, pasMinutes: number): Structure {
-  return {
-    meta: {
-      version: 1,
-      dateModification: new Date().toISOString().slice(0, 10),
-      auteur: meta.auteur,
-      etablissement: meta.etablissement,
-      ...(meta.libelle ? { libelle: meta.libelle } : {}),
-    },
-    // Bornes placees aux extremes de la journee : le premier passage par
-    // `elargieGrille`, juste apres, les ramene EXACTEMENT aux bornes reelles
-    // du fichier importe (elle ne fait qu'elargir, jamais retrecir). Un
-    // placeholder « raisonnable » comme 09:00 s'y serait substitue en
-    // silence si le fichier commencait plus tard, sans jamais etre corrige —
-    // fragile des que ce placeholder n'est pas un multiple exact du pas.
-    grille: { pasMinutes, jours: [], debut: '23:59', fin: '00:00', pauses: [] },
-    salles: [],
-    groupes: [],
-    jeunes: [],
-    educateurs: [],
-    activites: [],
-    planningType: [],
-    regles: [],
-  };
+  // Bornes placees aux EXTREMES de la journee : le premier passage par
+  // `elargieGrille`, juste apres, les ramene exactement aux bornes reelles du
+  // fichier importe (elle ne fait qu'elargir, jamais retrecir). Un placeholder
+  // « raisonnable » comme 09:00 s'y serait substitue en silence si le fichier
+  // commencait plus tard, sans jamais etre corrige — fragile des que ce
+  // placeholder n'est pas un multiple exact du pas.
+  return structureVierge({ ...meta, jours: [], debut: '23:59', fin: '00:00', pasMinutes });
 }
 
 function heureEnMinutes(h: string): number {

@@ -43,6 +43,10 @@ import {
 import {
   JOURS,
   Referentiel,
+  ajouteActivite,
+  ajouteCreneau,
+  ajouteEducateur,
+  ajouteJeune,
   ajouteSalle,
   assemble,
   bornesDuJour,
@@ -63,7 +67,10 @@ import {
   jeunesSansAffectation,
   journeeDe,
   litPlanning,
+  modifieActivite,
   modifieCreneau,
+  modifieEducateur,
+  modifieJeune,
   modifieSalle,
   nomsRencontres,
   optionsAvec,
@@ -73,7 +80,11 @@ import {
   reparePeriode,
   retireDuCreneau,
   sallesLibres,
+  structureVierge,
+  supprimeActivite,
   supprimeCreneau,
+  supprimeEducateur,
+  supprimeJeune,
   supprimeSalle,
   termineCreneauA,
   validePeriode,
@@ -1270,6 +1281,41 @@ function EcranPlanning({
           .map((e) => ({ valeur: e.id, libelle: referentiel.libelleEducateur(e.id) }));
   }, [axe, referentiel]);
 
+  /* Ajouter un créneau, puis l'ouvrir : on le pose à la suite du dernier de la
+     journée avec la durée déclarée de l'activité, et c'est l'éditeur qui sert à
+     l'ajuster. Un formulaire de création de plus ferait deux endroits où régler
+     les mêmes champs. */
+  const [messageAjout, setMessageAjout] = useState(null);
+
+  const ajouterCreneau = () => {
+    const activite = referentiel.structure.activites[0];
+    if (!activite) {
+      setMessageAjout(
+        'Aucune activité définie : un créneau doit en désigner une. Créez-en une dans l’écran Structure.',
+      );
+      return;
+    }
+    setMessageAjout(null);
+
+    const grille = referentiel.grille;
+    const finsDuJour = planning.creneaux.map((c) => c.pasDebut + c.pas);
+    const duree = Math.max(1, Math.min(activite.dureePas, grille.nbPas));
+    const pasDebut = Math.min(finsDuJour.length > 0 ? Math.max(...finsDuJour) : 0, grille.nbPas - duree);
+
+    const suivante = ajouteCreneau(structure, {
+      jour: jourAffiche,
+      debut: grille.heureDePas(Math.max(0, pasDebut)),
+      pas: duree,
+      activiteId: activite.id,
+      salleId: null,
+      jeunes: [],
+      educateurs: [],
+      verrouille: false,
+    });
+    setStructure(suivante);
+    setCreneauOuvert(suivante.planningType[suivante.planningType.length - 1].id);
+  };
+
   /* Une fiche sans personne choisie n'affiche rien : on prend la première. */
   useEffect(() => {
     if (!estFiche(axe)) return;
@@ -1337,10 +1383,21 @@ function EcranPlanning({
             </Champ>
           </div>
         )}
+        {!montreReparation && setStructure && (
+          <Bouton icone={Plus} onClick={ajouterCreneau}>
+            Ajouter un créneau
+          </Bouton>
+        )}
         <Bouton icone={Printer} onClick={imprimer}>
           Imprimer
         </Bouton>
       </div>
+
+      {messageAjout && (
+        <Bandeau ton="alerte" icone={AlertTriangle}>
+          {messageAjout}
+        </Bandeau>
+      )}
 
       {source === 'reparation' && !journee && (
         <Bandeau ton="info" icone={Info} titre="Aucune journée analysée">
@@ -1421,7 +1478,7 @@ function EcranPlanning({
                   pour dire trois choses. */}
               {libres
                 .reduce((plages, c) => {
-                  const cle = c.libres.join(' ');
+                  const cle = c.libres.join(' ');
                   const derniere = plages[plages.length - 1];
                   if (derniere && derniere.cle === cle) derniere.fin = c.pas + 1;
                   else plages.push({ cle, libres: c.libres, debut: c.pas, fin: c.pas + 1 });
@@ -2300,63 +2357,114 @@ function semaineEnTexte(semaine) {
   return entrees.map(([jour, p]) => `${jour.slice(0, 3)} ${p.debut}–${p.fin}`).join(' · ');
 }
 
-/* Les salles ne viennent presque jamais du tableur : un planning manuscrit ne
-   les nomme pas. C'est le seul endroit où on les saisit, et sans elles l'axe
-   « par salle » de la grille n'a rien à montrer. */
-function CarteSalles({ structure, setStructure }) {
+/* Carte d'une liste éditable : jeunes, éducateurs, activités, salles.
+
+   Les quatre se ressemblent au point que les écrire séparément ferait quatre
+   fois le même bug à corriger. Chacune n'a que deux champs qui comptent — un
+   nom et une valeur propre au type — et les mêmes gestes : renommer sur place,
+   supprimer, ajouter en bas.
+
+   Rien de métier ici : la suppression passe par `src/edition.ts`, qui sait ce
+   qu'il faut nettoyer avec (binômes, groupes, cibles de règles). L'écran ne
+   fait que demander confirmation en annonçant l'impact. */
+function CarteEditable({
+  titre,
+  sousTitre,
+  vide,
+  entrees,
+  secondaire,
+  placeholder,
+  onRenommer,
+  onSecondaire,
+  onSupprimer,
+  onAjouter,
+}) {
   const [nom, setNom] = useState('');
-  const [capacite, setCapacite] = useState('6');
+  const [valeur, setValeur] = useState(secondaire.defaut);
+  const [erreur, setErreur] = useState(null);
 
   const ajouter = () => {
     if (!nom.trim()) return;
-    setStructure(ajouteSalle(structure, { nom: nom.trim(), capacite: Math.max(0, Number(capacite) || 0) }));
+    onAjouter(nom.trim(), valeur);
     setNom('');
+    setValeur(secondaire.defaut);
   };
 
-  const supprimer = (salle) => {
-    const dessus = structure.planningType.filter((c) => c.salleId === salle.id).length;
-    const avertissement = dessus > 0 ? `\n\n${dessus} créneau(x) s’y tiennent : ils se retrouveront sans salle.` : '';
-    if (!window.confirm(`Supprimer « ${salle.nom} » ?${avertissement}`)) return;
-    setStructure(supprimeSalle(structure, salle.id));
+  /* Une suppression peut être refusée par le moteur — une activité encore
+     utilisée, par exemple. Le message qu'il donne est plus précis que tout ce
+     que l'écran pourrait inventer : on l'affiche tel quel. */
+  const supprimer = (entree) => {
+    try {
+      setErreur(null);
+      onSupprimer(entree);
+    } catch (e) {
+      setErreur(e instanceof Error ? e.message : String(e));
+    }
   };
+
+  const champSecondaire = (val, onChange, aria) =>
+    secondaire.options ? (
+      <select
+        className="w-32 rounded-lg border px-2 py-1 text-sm"
+        style={styleSaisie}
+        value={val}
+        aria-label={aria}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {secondaire.options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+    ) : (
+      <input
+        type="number"
+        min={secondaire.min ?? 0}
+        step={secondaire.pas ?? 1}
+        className="w-20 rounded-lg border px-2 py-1 text-sm"
+        style={styleSaisie}
+        value={val}
+        aria-label={aria}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
 
   return (
-    <Carte titre={`Salles (${structure.salles.length})`} sousTitre="Elles se saisissent ici, pas dans le tableur">
-      {structure.salles.length === 0 ? (
-        <Vide>Aucune salle. Sans elles, la grille « par salle » et les règles de salle n’ont rien à dire.</Vide>
+    <Carte titre={`${titre} (${entrees.length})`} sousTitre={sousTitre}>
+      {erreur && (
+        <div className="mb-2">
+          <Bandeau ton="alerte" icone={AlertTriangle}>
+            {erreur}
+          </Bandeau>
+        </div>
+      )}
+
+      {entrees.length === 0 ? (
+        <Vide>{vide}</Vide>
       ) : (
         <div className="space-y-1.5">
-          {structure.salles.map((salle) => (
+          {entrees.map((entree) => (
             <div
-              key={salle.id}
+              key={entree.id}
               className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm"
               style={{ borderColor: 'var(--border)' }}
             >
               <input
                 className="min-w-0 flex-1 rounded-lg border px-2 py-1 text-sm"
                 style={styleSaisie}
-                value={salle.nom}
-                aria-label={`Nom de ${salle.nom}`}
-                onChange={(e) => setStructure(modifieSalle(structure, salle.id, { nom: e.target.value }))}
+                value={entree.nom}
+                aria-label={`Nom de ${entree.nom}`}
+                onChange={(e) => onRenommer(entree, e.target.value)}
               />
-              <input
-                type="number"
-                min="0"
-                className="w-20 rounded-lg border px-2 py-1 text-sm"
-                style={styleSaisie}
-                value={salle.capacite}
-                aria-label={`Capacité de ${salle.nom}`}
-                onChange={(e) =>
-                  setStructure(modifieSalle(structure, salle.id, { capacite: Math.max(0, Number(e.target.value) || 0) }))
-                }
-              />
-              <span className="text-xs" style={{ color: 'var(--ink-soft)' }}>
-                places
+              {champSecondaire(entree.valeur, (v) => onSecondaire(entree, v), `${secondaire.libelle} de ${entree.nom}`)}
+              <span className="shrink-0 text-xs" style={{ color: 'var(--ink-soft)' }}>
+                {secondaire.unite}
               </span>
               <button
                 type="button"
-                onClick={() => supprimer(salle)}
-                aria-label={`Supprimer ${salle.nom}`}
+                onClick={() => supprimer(entree)}
+                aria-label={`Supprimer ${entree.nom}`}
                 className="rounded-lg border p-1"
                 style={{ borderColor: 'var(--border)', color: 'var(--crisis)' }}
               >
@@ -2369,27 +2477,20 @@ function CarteSalles({ structure, setStructure }) {
 
       <div className="mt-3 flex items-end gap-2">
         <div className="flex-1">
-          <Champ libelle="Nouvelle salle">
+          <Champ libelle={`Ajouter ${titre.toLowerCase().replace(/s$/, '')}`}>
             <input
               className="w-full rounded-xl border px-3 py-2 text-sm"
               style={styleSaisie}
               value={nom}
-              placeholder="Salle sensorielle"
+              placeholder={placeholder}
               onChange={(e) => setNom(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && ajouter()}
             />
           </Champ>
         </div>
-        <div className="w-24">
-          <Champ libelle="Places">
-            <input
-              type="number"
-              min="0"
-              className="w-full rounded-xl border px-3 py-2 text-sm"
-              style={styleSaisie}
-              value={capacite}
-              onChange={(e) => setCapacite(e.target.value)}
-            />
+        <div className="w-32">
+          <Champ libelle={secondaire.libelle}>
+            {champSecondaire(valeur, setValeur, `${secondaire.libelle} du nouvel élément`)}
           </Champ>
         </div>
         <Bouton variante="primaire" icone={Plus} onClick={ajouter} disabled={!nom.trim()}>
@@ -2397,6 +2498,148 @@ function CarteSalles({ structure, setStructure }) {
         </Bouton>
       </div>
     </Carte>
+  );
+}
+
+/* Combien de créneaux nomment cette personne : ce qu'il faut annoncer avant de
+   la supprimer, parce que la suppression les touchera aussi. */
+function creneauxDe(structure, id, champ) {
+  return structure.planningType.filter((c) => c[champ].includes(id)).length;
+}
+
+function confirmeRetrait(quoi, nom, dessus, consequence) {
+  const detail = dessus > 0 ? `\n\n${dessus} créneau(x) ${consequence}` : '';
+  return window.confirm(`Supprimer ${quoi} « ${nom} » ?${detail}`);
+}
+
+function CarteJeunes({ structure, setStructure }) {
+  return (
+    <CarteEditable
+      titre="Jeunes"
+      sousTitre="Le prénom tel qu’il est écrit sur le planning, et le taux d’encadrement"
+      vide="Aucun jeune. Ajoutez-les ici, ou importez un planning depuis un tableur."
+      placeholder="Prénom"
+      entrees={structure.jeunes.map((j) => ({ id: j.id, nom: j.initiales, valeur: j.encadrement }))}
+      secondaire={{ libelle: 'Encadrement', unite: 'éduc./jeune', defaut: '1', min: 0.01, pas: 0.01 }}
+      onRenommer={(e, v) => setStructure(modifieJeune(structure, e.id, { initiales: v }))}
+      onSecondaire={(e, v) =>
+        setStructure(modifieJeune(structure, e.id, { encadrement: Math.max(0.01, Number(v) || 0.01) }))
+      }
+      onSupprimer={(e) => {
+        const dessus = creneauxDe(structure, e.id, 'jeunes');
+        if (!confirmeRetrait('le jeune', e.nom, dessus, 'le nomment : il en sera retiré, binômes compris.')) return;
+        setStructure(supprimeJeune(structure, e.id));
+      }}
+      onAjouter={(nom, valeur) =>
+        setStructure(
+          ajouteJeune(structure, {
+            initiales: nom,
+            encadrement: Math.max(0.01, Number(valeur) || 1),
+            presence: {},
+            actif: true,
+          }),
+        )
+      }
+    />
+  );
+}
+
+function CarteEducateurs({ structure, setStructure }) {
+  return (
+    <CarteEditable
+      titre="Éducateurs"
+      sousTitre="Le statut décide qui le moteur peut mobiliser, et à quel coût"
+      vide="Aucun éducateur. Sans eux, aucun créneau ne peut être encadré."
+      placeholder="Nom ou prénom"
+      entrees={structure.educateurs.map((e) => ({ id: e.id, nom: e.nom, valeur: e.statut }))}
+      secondaire={{
+        libelle: 'Statut',
+        unite: '',
+        defaut: 'titulaire',
+        options: ['titulaire', 'renfort', 'autre-batiment', 'stagiaire'],
+      }}
+      onRenommer={(e, v) => setStructure(modifieEducateur(structure, e.id, { nom: v }))}
+      onSecondaire={(e, v) => setStructure(modifieEducateur(structure, e.id, { statut: v }))}
+      onSupprimer={(e) => {
+        const dessus = creneauxDe(structure, e.id, 'educateurs');
+        if (!confirmeRetrait('l’éducateur', e.nom, dessus, 'le nomment : il en sera retiré, binômes compris.'))
+          return;
+        setStructure(supprimeEducateur(structure, e.id));
+      }}
+      onAjouter={(nom, valeur) =>
+        setStructure(
+          ajouteEducateur(structure, {
+            nom,
+            statut: valeur,
+            disponibilites: {},
+            detachable: true,
+            actif: true,
+          }),
+        )
+      }
+    />
+  );
+}
+
+function CarteActivites({ structure, setStructure }) {
+  return (
+    <CarteEditable
+      titre="Activités"
+      sousTitre="La durée déclarée sert de référence : un créneau qui s’en écarte est signalé"
+      vide="Aucune activité. Un créneau ne peut pas exister sans en désigner une."
+      placeholder="Accueil, Sport, Repas…"
+      entrees={structure.activites.map((a) => ({ id: a.id, nom: a.nom, valeur: a.dureePas }))}
+      secondaire={{ libelle: 'Durée', unite: 'pas', defaut: '2', min: 1 }}
+      onRenommer={(e, v) => setStructure(modifieActivite(structure, e.id, { nom: v }))}
+      onSecondaire={(e, v) =>
+        setStructure(modifieActivite(structure, e.id, { dureePas: Math.max(1, Number(v) || 1) }))
+      }
+      onSupprimer={(e) => {
+        // Pas de confirmation : le moteur refuse tant qu'elle sert, et son
+        // message dit exactement combien de créneaux la retiennent.
+        setStructure(supprimeActivite(structure, e.id));
+      }}
+      onAjouter={(nom, valeur) =>
+        setStructure(
+          ajouteActivite(structure, {
+            nom,
+            dureePas: Math.max(1, Number(valeur) || 1),
+            sallesPossibles: [],
+            tagSalleRequis: null,
+            capaciteJeunes: null,
+            educateursRequis: null,
+          }),
+        )
+      }
+    />
+  );
+}
+
+/* Les salles ne viennent presque jamais du tableur : un planning manuscrit ne
+   les nomme pas. C'est le seul endroit où on les saisit, et sans elles l'axe
+   « par salle » de la grille n'a rien à montrer. */
+function CarteSalles({ structure, setStructure }) {
+  return (
+    <CarteEditable
+      titre="Salles"
+      sousTitre="Elles se saisissent ici, pas dans le tableur"
+      vide="Aucune salle. Sans elles, la grille « par salle » et les règles de salle n’ont rien à dire."
+      placeholder="Salle sensorielle"
+      entrees={structure.salles.map((s) => ({ id: s.id, nom: s.nom, valeur: s.capacite }))}
+      secondaire={{ libelle: 'Places', unite: 'places', defaut: '6', min: 0 }}
+      onRenommer={(e, v) => setStructure(modifieSalle(structure, e.id, { nom: v }))}
+      onSecondaire={(e, v) =>
+        setStructure(modifieSalle(structure, e.id, { capacite: Math.max(0, Number(v) || 0) }))
+      }
+      onSupprimer={(e) => {
+        const dessus = structure.planningType.filter((c) => c.salleId === e.id).length;
+        if (!confirmeRetrait('la salle', e.nom, dessus, 's’y tiennent : ils se retrouveront sans salle.')) return;
+        setStructure(supprimeSalle(structure, e.id));
+      }}
+      onAjouter={(nom, valeur) =>
+        setStructure(ajouteSalle(structure, { nom, capacite: Math.max(0, Number(valeur) || 0) }))
+      }
+    />
   );
 }
 
@@ -2426,34 +2669,28 @@ function EcranStructure({ referentiel, structure, setStructure }) {
         </p>
       </Carte>
 
-      <Carte titre={`Jeunes (${s.jeunes.length})`}>
-        <Table
-          colonnes={['initiales', 'groupe', 'encadrement', 'présence', '']}
-          lignes={s.jeunes.map((j) => [
-            j.initiales,
-            referentiel.groupes.get(j.groupeId)?.nom ?? '—',
-            j.encadrement,
-            semaineEnTexte(j.presence),
-            j.actif ? '' : 'inactif',
-          ])}
-        />
-      </Carte>
-
-      <Carte titre={`Éducateurs (${s.educateurs.length})`}>
-        <Table
-          colonnes={['nom', 'statut', 'détachable', 'disponibilités', '']}
-          lignes={s.educateurs.map((e) => [
-            referentiel.libelleEducateur(e.id),
-            e.statut,
-            e.detachable ? 'oui' : 'non',
-            semaineEnTexte(e.disponibilites),
-            e.actif ? '' : 'inactif',
-          ])}
-        />
-      </Carte>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <CarteJeunes structure={s} setStructure={setStructure} />
+        <CarteEducateurs structure={s} setStructure={setStructure} />
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
+        <CarteActivites structure={s} setStructure={setStructure} />
         <CarteSalles structure={s} setStructure={setStructure} />
+      </div>
+
+      {/* Présences, disponibilités et groupes restent en lecture : ils viennent
+          d'un fichier et se saisissent mal dans une liste. */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Carte titre="Présences et disponibilités" sousTitre="Telles qu'elles arrivent du fichier">
+          <Table
+            colonnes={['qui', 'semaine']}
+            lignes={[
+              ...s.jeunes.map((j) => [j.initiales, semaineEnTexte(j.presence)]),
+              ...s.educateurs.map((e) => [referentiel.libelleEducateur(e.id), semaineEnTexte(e.disponibilites)]),
+            ]}
+          />
+        </Carte>
         <Carte titre={`Groupes (${s.groupes.length})`}>
           <Table
             colonnes={['nom', 'éducateurs de référence', 'jeunes']}
@@ -2465,19 +2702,6 @@ function EcranStructure({ referentiel, structure, setStructure }) {
           />
         </Carte>
       </div>
-
-      <Carte titre={`Activités (${s.activites.length})`}>
-        <Table
-          colonnes={['nom', 'durée', 'salles', 'capacité', 'éducateurs requis']}
-          lignes={s.activites.map((a) => [
-            a.nom,
-            `${a.dureePas} pas`,
-            (a.sallesPossibles ?? []).map((id) => referentiel.salle(id)?.nom ?? id).join(', ') || '—',
-            a.capaciteJeunes ?? '—',
-            a.educateursRequis ?? 'déduit de l’encadrement',
-          ])}
-        />
-      </Carte>
     </div>
   );
 }
@@ -2888,6 +3112,135 @@ function ImportTableur({ referentiel, structure, onCharge }) {
   );
 }
 
+/* Commencer un planning sans aucun fichier.
+
+   Sans ça, l'application était un mur pour qui n'a pas d'export de tableur :
+   pas de structure, donc pas de grille, donc rien à éditer. Ce formulaire ne
+   demande que ce dont la grille a besoin pour exister — les jeunes, les
+   éducateurs et les activités se saisissent ensuite dans l'écran Structure,
+   les créneaux dans la grille elle-même. */
+function CarteDepartVierge({ onCommencer }) {
+  const [auteur, setAuteur] = useState('');
+  const [etablissement, setEtablissement] = useState('');
+  const [jours, setJours] = useState(['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi']);
+  const [debut, setDebut] = useState('09:00');
+  const [fin, setFin] = useState('16:30');
+  const [pasMinutes, setPasMinutes] = useState('30');
+
+  const bascule = (jour) =>
+    setJours((actuels) =>
+      actuels.includes(jour) ? actuels.filter((j) => j !== jour) : JOURS.filter((j) => actuels.includes(j) || j === jour),
+    );
+
+  const finApresDebut = fin > debut;
+  const pret = auteur.trim() && etablissement.trim() && jours.length > 0 && finApresDebut;
+
+  const commencer = () =>
+    onCommencer(
+      structureVierge({
+        auteur: auteur.trim(),
+        etablissement: etablissement.trim(),
+        jours,
+        debut,
+        fin,
+        pasMinutes: Number(pasMinutes),
+      }),
+    );
+
+  return (
+    <Carte
+      titre="Commencer un planning vide"
+      sousTitre="Sans fichier : vous saisissez tout à la main, en partant de la grille"
+    >
+      <div className="space-y-3">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Champ libelle="Auteur">
+            <input
+              type="text"
+              className="w-full rounded-xl border px-3 py-2 text-sm"
+              style={styleSaisie}
+              value={auteur}
+              onChange={(e) => setAuteur(e.target.value)}
+            />
+          </Champ>
+          <Champ libelle="Établissement">
+            <input
+              type="text"
+              className="w-full rounded-xl border px-3 py-2 text-sm"
+              style={styleSaisie}
+              value={etablissement}
+              onChange={(e) => setEtablissement(e.target.value)}
+            />
+          </Champ>
+        </div>
+
+        <div>
+          <Etiquette>Jours d’accueil</Etiquette>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {JOURS.map((jour) => (
+              <button
+                key={jour}
+                type="button"
+                onClick={() => bascule(jour)}
+                aria-pressed={jours.includes(jour)}
+                className="rounded-lg border px-2.5 py-1 text-sm"
+                style={
+                  jours.includes(jour)
+                    ? { background: 'var(--accent)', color: 'var(--accent-ink)', borderColor: 'var(--accent)' }
+                    : { borderColor: 'var(--border)', color: 'var(--ink-soft)' }
+                }
+              >
+                {jour}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Champ libelle="Ouverture">
+            <input
+              type="time"
+              className="w-full rounded-xl border px-3 py-2 text-sm"
+              style={styleSaisie}
+              value={debut}
+              onChange={(e) => setDebut(e.target.value)}
+            />
+          </Champ>
+          <Champ libelle="Fermeture">
+            <input
+              type="time"
+              className="w-full rounded-xl border px-3 py-2 text-sm"
+              style={styleSaisie}
+              value={fin}
+              onChange={(e) => setFin(e.target.value)}
+            />
+          </Champ>
+          <Champ
+            libelle="Pas de la grille"
+            aide="La plus petite durée manipulable. Toute règle exprimée en pas change d’échelle avec lui."
+          >
+            <Selecteur
+              valeur={pasMinutes}
+              onChange={setPasMinutes}
+              options={[5, 10, 15, 30, 60].map((m) => ({ valeur: String(m), libelle: `${m} min` }))}
+            />
+          </Champ>
+        </div>
+
+        {!finApresDebut && (
+          <Bandeau ton="alerte" icone={AlertTriangle}>
+            La fermeture doit être après l’ouverture.
+          </Bandeau>
+        )}
+
+        <Bouton variante="primaire" icone={Plus} onClick={commencer} disabled={!pret}>
+          Commencer
+        </Bouton>
+      </div>
+    </Carte>
+  );
+}
+
 function EcranFichiers({
   structure,
   referentiel,
@@ -3030,6 +3383,12 @@ function EcranFichiers({
         </Bandeau>
       )}
 
+      {/* Sans structure, partir d'une grille vide est une entrée à part
+          entière — pas un repli. Une fois quelque chose de chargé, la carte
+          disparaît : « commencer » écraserait le travail en cours, et c'est
+          « Vider ce poste » (écran Réglages) qui sert à repartir de zéro. */}
+      {!structure && <CarteDepartVierge onCommencer={chargerStructure} />}
+
       <Carte
         titre="structure.json"
         sousTitre="Le fichier qui circule par mail — celui qui définit tout ce que le moteur sait faire"
@@ -3064,8 +3423,9 @@ function EcranFichiers({
           <div className="mb-4">
             <Bandeau ton="info" icone={Info} titre="Aucun planning chargé">
               L’application est livrée vide : elle ne connaît ni vos jeunes, ni vos éducateurs, ni vos
-              salles tant que vous ne lui avez rien donné. Déposez un <code style={{ fontFamily: F_MONO }}>structure.json</code>{' '}
-              pour commencer.
+              salles tant que vous ne lui avez rien donné. Trois façons d’entrer : déposer un{' '}
+              <code style={{ fontFamily: F_MONO }}>structure.json</code>, coller un planning de tableur plus bas,
+              ou partir d’une grille vide et tout saisir à la main.
             </Bandeau>
           </div>
         )}

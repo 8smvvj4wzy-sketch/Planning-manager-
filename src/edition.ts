@@ -23,7 +23,65 @@
 
 import { idUnique } from './import/identifiants.ts';
 import { heureEnMinutes } from './temps.ts';
-import type { Affectation, CreneauType, Heure, Jour, Salle, Structure } from './types.ts';
+import type {
+  Activite,
+  Affectation,
+  CreneauType,
+  Educateur,
+  Heure,
+  Jeune,
+  Jour,
+  Salle,
+  Structure,
+} from './types.ts';
+
+export interface DepartVierge {
+  auteur: string;
+  etablissement: string;
+  libelle?: string;
+  jours: readonly Jour[];
+  debut: Heure;
+  fin: Heure;
+  pasMinutes: number;
+}
+
+/**
+ * Une structure neuve, sans personne ni activite.
+ *
+ * Il faut pouvoir commencer un planning SANS tableur : l'application etait un
+ * mur pour qui n'avait pas de fichier a importer — pas de structure, donc pas
+ * de grille, donc rien a editer.
+ *
+ * `src/import/assemblage.ts` construit la sienne par ici aussi, avec des bornes
+ * volontairement extremes (23:59–00:00) que le premier elargissement ramene aux
+ * bornes reelles du fichier. Un seul constructeur, deux usages : une structure
+ * vide n'a pas a exister en deux versions qui divergeront.
+ */
+export function structureVierge(depart: DepartVierge): Structure {
+  return {
+    meta: {
+      version: 1,
+      dateModification: new Date().toISOString().slice(0, 10),
+      auteur: depart.auteur,
+      etablissement: depart.etablissement,
+      ...(depart.libelle ? { libelle: depart.libelle } : {}),
+    },
+    grille: {
+      pasMinutes: depart.pasMinutes,
+      jours: [...depart.jours],
+      debut: depart.debut,
+      fin: depart.fin,
+      pauses: [],
+    },
+    salles: [],
+    groupes: [],
+    jeunes: [],
+    educateurs: [],
+    activites: [],
+    planningType: [],
+    regles: [],
+  };
+}
 
 /**
  * Ce qu'on peut changer sur un creneau. Chaque champ absent est laisse tel
@@ -184,6 +242,128 @@ export function modifieSalle(
     ...structure,
     salles: structure.salles.map((s) => (s.id === id ? { ...s, ...changement } : s)),
   };
+}
+
+/* ==================== Jeunes, educateurs, activites ==================== */
+
+/**
+ * Retire une personne de PARTOUT : c'est la seule facon de la supprimer sans
+ * laisser une reference cassee derriere soi.
+ *
+ * Une personne est citee a quatre endroits en plus de sa propre liste — les
+ * `jeunes`/`educateurs` d'un creneau, ses `affectations`, les `refEducateurs`
+ * d'un groupe, et les `cibles` d'une regle. En oublier un rend la structure
+ * invalide juste apres un geste qui, a l'ecran, n'avait rien d'ambigu. Meme
+ * lecon que `supprimeSalle`, ou l'oubli des `sallesPossibles` avait ete
+ * rattrape par un test et non a la relecture.
+ */
+function sansLaPersonne(structure: Structure, id: string, type: 'jeune' | 'educateur'): Structure {
+  const planningType = structure.planningType.map((creneau) => {
+    const jeunes = type === 'jeune' ? creneau.jeunes.filter((x) => x !== id) : creneau.jeunes;
+    const educateurs = type === 'educateur' ? creneau.educateurs.filter((x) => x !== id) : creneau.educateurs;
+    const affectations = affectationsTenables(creneau.affectations, jeunes, educateurs);
+    return { ...creneau, jeunes, educateurs, ...(affectations ? { affectations } : {}) };
+  });
+
+  return {
+    ...structure,
+    planningType,
+    groupes:
+      type === 'educateur'
+        ? structure.groupes.map((g) =>
+            g.refEducateurs?.includes(id) ? { ...g, refEducateurs: g.refEducateurs.filter((x) => x !== id) } : g,
+          )
+        : structure.groupes,
+    regles: structure.regles.map((regle) => {
+      const cle = type === 'jeune' ? 'jeunes' : 'educateurs';
+      const cibles = regle.cibles[cle];
+      if (!cibles?.includes(id)) return regle;
+      return { ...regle, cibles: { ...regle.cibles, [cle]: cibles.filter((x) => x !== id) } };
+    }),
+  };
+}
+
+export function ajouteJeune(structure: Structure, jeune: Omit<Jeune, 'id'>): Structure {
+  const id = idUnique(jeune.initiales, new Set(structure.jeunes.map((j) => j.id)));
+  return { ...structure, jeunes: [...structure.jeunes, { ...jeune, id }] };
+}
+
+export function modifieJeune(
+  structure: Structure,
+  id: string,
+  changement: Partial<Omit<Jeune, 'id'>>,
+): Structure {
+  if (!structure.jeunes.some((j) => j.id === id)) throw new Error(`Jeune inconnu : "${id}"`);
+  return {
+    ...structure,
+    jeunes: structure.jeunes.map((j) => (j.id === id ? { ...j, ...changement } : j)),
+  };
+}
+
+export function supprimeJeune(structure: Structure, id: string): Structure {
+  if (!structure.jeunes.some((j) => j.id === id)) throw new Error(`Jeune inconnu : "${id}"`);
+  const nettoyee = sansLaPersonne(structure, id, 'jeune');
+  return { ...nettoyee, jeunes: nettoyee.jeunes.filter((j) => j.id !== id) };
+}
+
+export function ajouteEducateur(structure: Structure, educateur: Omit<Educateur, 'id'>): Structure {
+  const id = idUnique(educateur.nom, new Set(structure.educateurs.map((e) => e.id)));
+  return { ...structure, educateurs: [...structure.educateurs, { ...educateur, id }] };
+}
+
+export function modifieEducateur(
+  structure: Structure,
+  id: string,
+  changement: Partial<Omit<Educateur, 'id'>>,
+): Structure {
+  if (!structure.educateurs.some((e) => e.id === id)) throw new Error(`Educateur inconnu : "${id}"`);
+  return {
+    ...structure,
+    educateurs: structure.educateurs.map((e) => (e.id === id ? { ...e, ...changement } : e)),
+  };
+}
+
+export function supprimeEducateur(structure: Structure, id: string): Structure {
+  if (!structure.educateurs.some((e) => e.id === id)) throw new Error(`Educateur inconnu : "${id}"`);
+  const nettoyee = sansLaPersonne(structure, id, 'educateur');
+  return { ...nettoyee, educateurs: nettoyee.educateurs.filter((e) => e.id !== id) };
+}
+
+export function ajouteActivite(structure: Structure, activite: Omit<Activite, 'id'>): Structure {
+  const id = idUnique(activite.nom, new Set(structure.activites.map((a) => a.id)));
+  return { ...structure, activites: [...structure.activites, { ...activite, id }] };
+}
+
+export function modifieActivite(
+  structure: Structure,
+  id: string,
+  changement: Partial<Omit<Activite, 'id'>>,
+): Structure {
+  if (!structure.activites.some((a) => a.id === id)) throw new Error(`Activite inconnue : "${id}"`);
+  return {
+    ...structure,
+    activites: structure.activites.map((a) => (a.id === id ? { ...a, ...changement } : a)),
+  };
+}
+
+/**
+ * Supprime une activite — REFUSE tant qu'un creneau s'en sert.
+ *
+ * Une activite n'est pas une personne : la retirer d'un creneau ne veut rien
+ * dire, un creneau sans activite n'existe pas. Les deux issues seraient donc
+ * de supprimer les creneaux dans la foulee, ce qui detruirait du travail sans
+ * le dire, ou de refuser. On refuse, en disant combien de creneaux sont
+ * concernes pour que l'appelant sache quoi faire ensuite.
+ */
+export function supprimeActivite(structure: Structure, id: string): Structure {
+  if (!structure.activites.some((a) => a.id === id)) throw new Error(`Activite inconnue : "${id}"`);
+  const utilisee = structure.planningType.filter((c) => c.activiteId === id).length;
+  if (utilisee > 0) {
+    throw new Error(
+      `"${id}" sert encore a ${utilisee} creneau(x) : supprimez-les ou changez leur activite d'abord.`,
+    );
+  }
+  return { ...structure, activites: structure.activites.filter((a) => a.id !== id) };
 }
 
 /**

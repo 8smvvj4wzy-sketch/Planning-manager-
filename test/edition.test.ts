@@ -1,12 +1,20 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  ajouteActivite,
   ajouteCreneau,
+  ajouteEducateur,
+  ajouteJeune,
   ajouteSalle,
   modifieCreneau,
+  modifieJeune,
   modifieSalle,
   retireDuCreneau,
+  structureVierge,
+  supprimeActivite,
   supprimeCreneau,
+  supprimeEducateur,
+  supprimeJeune,
   supprimeSalle,
   termineCreneauA,
   valideStructure,
@@ -173,6 +181,108 @@ describe('ajout d un créneau', () => {
     const s = ajouteCreneau(ajouteCreneau(structureMinimale(), creneau), creneau);
     const ids = s.planningType.map((c) => c.id);
     assert.equal(new Set(ids).size, ids.length);
+  });
+});
+
+describe('commencer un planning sans tableur', () => {
+  it('rend une structure vierge que la validation accepte', () => {
+    const s = structureVierge({
+      auteur: 'Test',
+      etablissement: 'IME Test',
+      jours: ['lundi', 'mardi'],
+      debut: '09:00',
+      fin: '16:30',
+      pasMinutes: 30,
+    });
+    assert.deepEqual(valideStructure(s).problemes.filter((p) => p.gravite === 'erreur'), []);
+    assert.deepEqual(s.grille.jours, ['lundi', 'mardi']);
+    assert.deepEqual(s.planningType, []);
+  });
+
+  it('se remplit à la main, de bout en bout', () => {
+    // Le parcours complet de quelqu'un qui n'a aucun fichier : la structure,
+    // puis les gens, puis une activité, puis un créneau.
+    let s = structureVierge({
+      auteur: 'Test',
+      etablissement: 'IME Test',
+      jours: ['lundi'],
+      debut: '09:00',
+      fin: '12:00',
+      pasMinutes: 30,
+    });
+    s = ajouteJeune(s, { initiales: 'Onyx', encadrement: 1, presence: {}, actif: true });
+    s = ajouteEducateur(s, { nom: 'Wren', statut: 'titulaire', disponibilites: {}, detachable: true, actif: true });
+    s = ajouteActivite(s, { nom: 'Accueil', dureePas: 2 });
+    s = ajouteCreneau(s, {
+      jour: 'lundi',
+      debut: '09:00',
+      pas: 2,
+      activiteId: s.activites[0]!.id,
+      salleId: null,
+      jeunes: [s.jeunes[0]!.id],
+      educateurs: [s.educateurs[0]!.id],
+      verrouille: false,
+    });
+
+    assert.equal(s.planningType.length, 1);
+    assert.deepEqual(valideStructure(s).problemes.filter((p) => p.gravite === 'erreur'), []);
+  });
+});
+
+describe('jeunes, éducateurs, activités — les références suivent', () => {
+  it('supprime un jeune de partout où il est nommé', () => {
+    // Un jeune est cité à quatre endroits en plus de sa propre liste. En
+    // oublier un rend la structure invalide après un geste sans ambiguïté.
+    let s = structureMinimale();
+    s.planningType[0]!.jeunes = ['ja', 'jb'];
+    s.planningType[0]!.affectations = [
+      { jeuneId: 'ja', educateurId: 'ea' },
+      { jeuneId: 'jb', educateurId: 'ea' },
+    ];
+    s.regles.push({
+      id: 'r1',
+      type: 'educateurs_interdits',
+      dure: true,
+      actif: true,
+      cibles: { jeunes: ['ja', 'jb'] },
+      params: { educateurs: ['eb'] },
+    });
+
+    s = supprimeJeune(s, 'ja');
+
+    assert.ok(!s.jeunes.some((j) => j.id === 'ja'));
+    assert.deepEqual(s.planningType[0]!.jeunes, ['jb']);
+    assert.deepEqual(s.planningType[0]!.affectations, [{ jeuneId: 'jb', educateurId: 'ea' }]);
+    assert.deepEqual(s.regles[0]!.cibles.jeunes, ['jb']);
+    assert.deepEqual(valideStructure(s).problemes.filter((p) => p.gravite === 'erreur'), []);
+  });
+
+  it('supprime un éducateur, y compris de la référence de son groupe', () => {
+    let s = structureMinimale();
+    assert.deepEqual(s.groupes[0]!.refEducateurs, ['ea'], 'la fixture le référence bien');
+
+    s = supprimeEducateur(s, 'ea');
+
+    assert.deepEqual(s.groupes[0]!.refEducateurs, []);
+    assert.deepEqual(s.planningType[0]!.educateurs, []);
+    assert.deepEqual(valideStructure(s).problemes.filter((p) => p.gravite === 'erreur'), []);
+  });
+
+  it('refuse de supprimer une activité encore utilisée, en disant combien', () => {
+    // La supprimer voudrait dire supprimer ses créneaux dans la foulée :
+    // détruire du travail sans le dire.
+    assert.throws(() => supprimeActivite(structureMinimale(), 'act'), /1 creneau/);
+  });
+
+  it('accepte de supprimer une activité que plus rien n utilise', () => {
+    const s = supprimeActivite(supprimeCreneau(structureMinimale(), 'c1'), 'act');
+    assert.deepEqual(s.activites, []);
+  });
+
+  it('modifie un jeune sans toucher à ses créneaux', () => {
+    const s = modifieJeune(structureMinimale(), 'ja', { initiales: 'Onyx', encadrement: 2 });
+    assert.equal(s.jeunes[0]!.initiales, 'Onyx');
+    assert.deepEqual(s.planningType[0]!.jeunes, ['ja']);
   });
 });
 
