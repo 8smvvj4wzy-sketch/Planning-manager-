@@ -1,11 +1,17 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  Referentiel,
   ajouteActivite,
   ajouteCreneau,
   ajouteEducateur,
   ajouteJeune,
   ajouteSalle,
+  calculDisponibilite,
+  educateursRequis,
+  etatJourNominal,
+  optionsAvec,
+  planningInitial,
   modifieCreneau,
   modifieJeune,
   modifieSalle,
@@ -223,8 +229,11 @@ describe('commencer un planning sans tableur', () => {
       fin: '12:00',
       pasMinutes: 30,
     });
-    s = ajouteJeune(s, { initiales: 'Onyx', encadrement: 1, presence: {}, actif: true });
-    s = ajouteEducateur(s, { nom: 'Wren', statut: 'titulaire', disponibilites: {}, detachable: true, actif: true });
+    // Ni `presence` ni `disponibilites` : c'est ce que fait l'interface, et
+    // c'est le geste qui a ouvert le trou — posées à `{}`, ces deux personnes
+    // étaient INVISIBLES pour le moteur pendant que la grille les affichait.
+    s = ajouteJeune(s, { initiales: 'Onyx', encadrement: 1, actif: true });
+    s = ajouteEducateur(s, { nom: 'Wren', statut: 'titulaire', detachable: true, actif: true });
     s = ajouteActivite(s, { nom: 'Accueil', dureePas: 2 });
     s = ajouteCreneau(s, {
       jour: 'lundi',
@@ -239,6 +248,22 @@ describe('commencer un planning sans tableur', () => {
 
     assert.equal(s.planningType.length, 1);
     assert.deepEqual(valideStructure(s).problemes.filter((p) => p.gravite === 'erreur'), []);
+
+    // L'assertion qui aurait attrapé le trou : la structure est valide ET le
+    // moteur voit les gens. La validation seule ne dit rien de ça.
+    const ref = new Referentiel(s);
+    const etat = etatJourNominal('lundi');
+    const planning = planningInitial(ref, etat);
+    const creneau = planning.creneau(s.planningType[0]!.id)!;
+    assert.ok(
+      educateursRequis(ref, etat, creneau, optionsAvec()) > 0,
+      'le jeune créé doit demander de l’encadrement',
+    );
+    assert.equal(
+      calculDisponibilite(ref, etat).mobilisable(s.educateurs[0]!.id, 0),
+      true,
+      'l’éducateur créé doit être mobilisable',
+    );
   });
 });
 

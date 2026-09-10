@@ -31,8 +31,10 @@ import type {
   Heure,
   Jeune,
   Jour,
+  Plage,
   Quinzaine,
   Salle,
+  Semaine,
   Structure,
 } from './types.ts';
 
@@ -295,9 +297,35 @@ function sansLaPersonne(structure: Structure, id: string, type: 'jeune' | 'educa
   };
 }
 
-export function ajouteJeune(structure: Structure, jeune: Omit<Jeune, 'id'>): Structure {
+/**
+ * Presence par defaut d'une personne creee a la main : tous les jours
+ * d'accueil, d'un bout a l'autre de la grille.
+ *
+ * Ce n'est pas un detail de confort. `jeunePresent` et `educateurDisponible`
+ * rendent `false` quand le jour est absent de la semaine : un jeune cree avec
+ * `presence: {}` etait donc INVISIBLE pour le moteur — aucun encadrement
+ * demande, aucun educateur mobilisable — pendant que la grille l'affichait
+ * normalement, puisqu'elle lit `planningType` en direct. Rien ne le signalait.
+ *
+ * Le defaut va donc dans ce sens : un jeune qu'on inscrit dans son IME est la,
+ * c'est l'absence qui se declare. Les presences reelles (temps partiel) se
+ * saisissent ensuite.
+ */
+function semaineComplete(structure: Structure): Semaine<Plage> {
+  const semaine: Semaine<Plage> = {};
+  for (const jour of structure.grille.jours) {
+    semaine[jour] = { debut: structure.grille.debut, fin: structure.grille.fin };
+  }
+  return semaine;
+}
+
+export function ajouteJeune(
+  structure: Structure,
+  jeune: Omit<Jeune, 'id' | 'presence'> & { presence?: Semaine<Plage> },
+): Structure {
   const id = idUnique(jeune.initiales, new Set(structure.jeunes.map((j) => j.id)));
-  return { ...structure, jeunes: [...structure.jeunes, { ...jeune, id }] };
+  const presence = jeune.presence ?? semaineComplete(structure);
+  return { ...structure, jeunes: [...structure.jeunes, { ...jeune, presence, id }] };
 }
 
 export function modifieJeune(
@@ -318,9 +346,13 @@ export function supprimeJeune(structure: Structure, id: string): Structure {
   return { ...nettoyee, jeunes: nettoyee.jeunes.filter((j) => j.id !== id) };
 }
 
-export function ajouteEducateur(structure: Structure, educateur: Omit<Educateur, 'id'>): Structure {
+export function ajouteEducateur(
+  structure: Structure,
+  educateur: Omit<Educateur, 'id' | 'disponibilites'> & { disponibilites?: Semaine<Plage> },
+): Structure {
   const id = idUnique(educateur.nom, new Set(structure.educateurs.map((e) => e.id)));
-  return { ...structure, educateurs: [...structure.educateurs, { ...educateur, id }] };
+  const disponibilites = educateur.disponibilites ?? semaineComplete(structure);
+  return { ...structure, educateurs: [...structure.educateurs, { ...educateur, disponibilites, id }] };
 }
 
 export function modifieEducateur(
