@@ -6,6 +6,8 @@ import {
   ajouteCreneau,
   ajouteEducateur,
   ajouteJeune,
+  ajouteGroupe,
+  ajoutePause,
   ajouteRegle,
   ajouteSalle,
   calculDisponibilite,
@@ -14,7 +16,10 @@ import {
   optionsAvec,
   planningInitial,
   modifieCreneau,
+  fixeSemaineAOrigine,
+  modifieGroupe,
   modifieJeune,
+  modifiePause,
   modifieParamRegle,
   modifieRegle,
   modifieSalle,
@@ -23,11 +28,14 @@ import {
   supprimeActivite,
   supprimeCreneau,
   supprimeEducateur,
+  supprimeGroupe,
+  supprimePause,
   supprimeJeune,
   supprimeRegle,
   supprimeSalle,
   termineCreneauA,
   valideStructure,
+  type Structure,
 } from '../src/index.ts';
 import { structureMinimale } from './aide.ts';
 
@@ -419,5 +427,110 @@ describe('édition des règles', () => {
     s = supprimeRegle(s, id);
     assert.deepEqual(s.regles, []);
     assert.throws(() => supprimeRegle(s, id), /Regle inconnue/);
+  });
+});
+
+describe('suppression — les règles ne gardent pas de référence pendante', () => {
+  // Nettoyer les `cibles` sans les `params` laissait un id cassé que la
+  // validation refuse. Les params ne se devinent pas : `educateurs_interdits`
+  // range sa liste sous `educateurs`, `perimetre_renfort` sous
+  // `jeunesAutorises`. Ce sont les descripteurs qui disent où chercher.
+  const codes = (s: Structure) =>
+    valideStructure(s).problemes.filter((p) => p.gravite === 'erreur').map((p) => p.code);
+
+  it('efface un éducateur des params d’une règle, pas seulement des cibles', () => {
+    let s = ajouteRegle(structureMinimale(), {
+      type: 'educateurs_interdits',
+      cibles: { jeunes: ['ja'] },
+      params: { educateurs: ['ea', 'eb'] },
+      commentaire: 'test',
+    });
+    s = supprimeEducateur(s, 'eb');
+    assert.deepEqual(s.regles[0]!.params?.['educateurs'], ['ea']);
+    assert.deepEqual(codes(s), [], 'aucune référence cassée');
+  });
+
+  it('efface une salle des params d’une règle salle_requise', () => {
+    let s = ajouteRegle(structureMinimale(), {
+      type: 'salle_requise',
+      cibles: { activites: ['act'] },
+      params: { salles: ['sa', 'sb'] },
+      commentaire: 'test',
+    });
+    s = supprimeSalle(s, 'sb');
+    assert.deepEqual(s.regles[0]!.params?.['salles'], ['sa']);
+    assert.deepEqual(codes(s), []);
+  });
+
+  it('signale la règle devenue vide au lieu de la supprimer en douce', () => {
+    // Retirer le DERNIER éducateur autorisé d'un jeune change ce que la règle
+    // veut dire. C'est à l'établissement de trancher — l'effacer sans rien dire
+    // relâcherait silencieusement une contrainte que quelqu'un avait posée.
+    let s = ajouteRegle(structureMinimale(), {
+      type: 'educateurs_autorises',
+      cibles: { jeunes: ['ja'] },
+      params: { educateurs: ['eb'] },
+      commentaire: 'test',
+    });
+    s = supprimeEducateur(s, 'eb');
+    assert.deepEqual(s.regles[0]!.params?.['educateurs'], []);
+    assert.deepEqual(codes(s), ['regle.params'], 'signalée, pas effacée ni cassée');
+  });
+});
+
+describe('groupes et pauses', () => {
+  it('délie les jeunes d’un groupe supprimé, et nettoie les règles', () => {
+    let s = ajouteRegle(structureMinimale(), {
+      type: 'presence_minimale',
+      cibles: { groupes: ['ga'] },
+      params: { educMin: 1 },
+      commentaire: 'test',
+    });
+    s = supprimeGroupe(s, 'ga');
+    assert.ok(!('groupeId' in s.jeunes[0]!), 'la clé disparaît, elle ne vaut pas null');
+    assert.deepEqual(s.regles[0]!.cibles.groupes, []);
+    // Un jeune sans groupe reste un jeune : contrairement à une activité, rien
+    // n'exige qu'il en ait un.
+    assert.deepEqual(
+      valideStructure(s).problemes.filter((p) => p.code === 'regle.reference'),
+      [],
+    );
+  });
+
+  it('crée un groupe et lui donne des éducateurs de référence', () => {
+    let s = ajouteGroupe(structureMinimale(), { nom: 'Groupe B', refEducateurs: [] });
+    const g = s.groupes[1]!;
+    assert.equal(g.nom, 'Groupe B');
+    s = modifieGroupe(s, g.id, { refEducateurs: ['eb'] });
+    assert.deepEqual(s.groupes[1]!.refEducateurs, ['eb']);
+
+    // Supprimer l'éducateur le retire aussi de la référence du groupe.
+    s = supprimeEducateur(s, 'eb');
+    assert.deepEqual(s.groupes[1]!.refEducateurs, []);
+    assert.deepEqual(valideStructure(s).problemes.filter((p) => p.gravite === 'erreur'), []);
+  });
+
+  it('pose une pause, la déplace, la retire', () => {
+    let s = ajoutePause(structureMinimale(), { debut: '11:00', pas: 2, libelle: 'Repas' });
+    assert.equal(s.grille.pauses?.length, 1);
+
+    s = modifiePause(s, 0, { debut: '11:30' });
+    assert.equal(s.grille.pauses?.[0]?.debut, '11:30');
+    assert.equal(s.grille.pauses?.[0]?.libelle, 'Repas', 'le reste ne bouge pas');
+
+    s = modifiePause(s, 0, { pas: 0 });
+    assert.equal(s.grille.pauses?.[0]?.pas, 1, 'une pause de durée nulle ne couvre aucun pas');
+
+    s = supprimePause(s, 0);
+    assert.deepEqual(s.grille.pauses, []);
+    assert.throws(() => supprimePause(s, 0), /index 0/);
+  });
+
+  it('retire l’ancre d’alternance au lieu de la poser à null', () => {
+    let s = fixeSemaineAOrigine(structureMinimale(), '2026-09-14');
+    assert.equal(s.grille.semaineAOrigine, '2026-09-14');
+    s = fixeSemaineAOrigine(s, null);
+    assert.ok(!('semaineAOrigine' in s.grille));
+    assert.deepEqual(valideStructure(s).problemes.filter((p) => p.gravite === 'erreur'), []);
   });
 });

@@ -76,9 +76,11 @@ dit « Marie Dupont », jamais `e1`.
 **Écran Règles** — créer, supprimer et régler entièrement une règle : cibles, paramètres,
 nature (dure / souple), poids, portée. Le formulaire de chaque type est bâti d'après ce que
 le moteur déclare attendre (`EvaluateurRegle.champs`), pas d'après une table écrite dans
-l'interface — celle-ci ne connaît aucune règle, seulement cinq formes de champ. **Écran Structure** — jeunes, éducateurs, activités et salles s'y
-**saisissent** ; présences, disponibilités et groupes restent en lecture, ils viennent du
-fichier.
+l'interface — celle-ci ne connaît aucune règle, seulement cinq formes de champ. **Écran Structure** — tout s'y saisit : jeunes, éducateurs, activités, salles, groupes,
+pauses. Le détail de chaque personne s'ouvre sur ses présences ou ses disponibilités, jour
+par jour ; celui d'une activité sur ses salles possibles et son encadrement ; celui d'une
+salle sur ses tags. Un tableau récapitule les semaines en lecture, pour qu'un oubli saute
+aux yeux.
 
 **Commencer sans fichier.** Trois entrées : déposer un `structure.json`, coller un
 planning de tableur, ou **partir d'une grille vide** — jours d'accueil, horaires, pas, et

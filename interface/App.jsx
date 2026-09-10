@@ -16,6 +16,7 @@ import {
   CalendarDays,
   Check,
   ChevronLeft,
+  ChevronDown,
   ChevronRight,
   CircleAlert,
   Download,
@@ -46,6 +47,8 @@ import {
   ajouteActivite,
   ajouteCreneau,
   ajouteEducateur,
+  ajouteGroupe,
+  ajoutePause,
   ajouteJeune,
   ajouteRegle,
   ajouteSalle,
@@ -72,7 +75,10 @@ import {
   modifieActivite,
   modifieCreneau,
   modifieEducateur,
+  fixeSemaineAOrigine,
+  modifieGroupe,
   modifieJeune,
+  modifiePause,
   modifieParamRegle,
   modifieRegle,
   modifieSalle,
@@ -88,7 +94,9 @@ import {
   supprimeActivite,
   supprimeCreneau,
   supprimeEducateur,
+  supprimeGroupe,
   supprimeJeune,
+  supprimePause,
   supprimeRegle,
   supprimeSalle,
   termineCreneauA,
@@ -2676,6 +2684,108 @@ function semaineEnTexte(semaine) {
   return entrees.map(([jour, p]) => `${jour.slice(0, 3)} ${p.debut}–${p.fin}`).join(' · ');
 }
 
+/* Une semaine de plages horaires : présences d'un jeune, disponibilités d'un
+   éducateur. Le même composant pour les deux — ce sont les mêmes données, et
+   les écrire deux fois ferait deux fois le même bug.
+
+   Un jour ABSENT de l'objet veut dire « pas accueilli », pas « accueilli de
+   00:00 à 00:00 ». La case décide de la présence de la clé ; les heures ne
+   s'affichent que si elle est cochée. Sans ça, décocher laisserait une plage
+   dans le fichier et le moteur continuerait à compter la personne. */
+function SemaineDePlages({ jours, semaine, bornes, onChange }) {
+  const poser = (jour, plage) => {
+    const suite = { ...(semaine ?? {}) };
+    if (plage) suite[jour] = plage;
+    else delete suite[jour];
+    onChange(suite);
+  };
+
+  return (
+    <div className="space-y-1.5">
+      {jours.map((jour) => {
+        const plage = semaine?.[jour];
+        return (
+          <div key={jour} className="flex flex-wrap items-center gap-2 text-sm">
+            <label className="flex w-24 shrink-0 items-center gap-2" style={{ color: 'var(--ink)' }}>
+              <input
+                type="checkbox"
+                checked={Boolean(plage)}
+                onChange={() => poser(jour, plage ? null : { ...bornes })}
+              />
+              {jour}
+            </label>
+            {plage ? (
+              <>
+                <input
+                  type="time"
+                  aria-label={`Début ${jour}`}
+                  className="w-28 rounded-lg border px-1.5 py-1 text-sm"
+                  style={styleSaisie}
+                  value={plage.debut}
+                  onChange={(e) => e.target.value && poser(jour, { ...plage, debut: e.target.value })}
+                />
+                <span style={{ color: 'var(--ink-soft)' }}>→</span>
+                <input
+                  type="time"
+                  aria-label={`Fin ${jour}`}
+                  className="w-28 rounded-lg border px-1.5 py-1 text-sm"
+                  style={styleSaisie}
+                  value={plage.fin}
+                  onChange={(e) => e.target.value && poser(jour, { ...plage, fin: e.target.value })}
+                />
+              </>
+            ) : (
+              <span className="text-xs" style={{ color: 'var(--ink-soft)' }}>
+                pas accueilli ce jour — le moteur ne le comptera pas
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* Une liste de mots libres : les tags d'une salle. Pas d'identifiants ici, donc
+   pas de ListePersonnes — un tag n'existe que par son écriture. */
+function ListeTags({ tags, onChange }) {
+  const [neuf, setNeuf] = useState('');
+  const ajouter = () => {
+    const t = neuf.trim();
+    if (!t || tags.includes(t)) return;
+    onChange([...tags, t]);
+    setNeuf('');
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {tags.map((t) => (
+        <span key={t} className="inline-flex items-center gap-1">
+          <Badge couleur={CAT_AMBER}>{t}</Badge>
+          <button
+            type="button"
+            onClick={() => onChange(tags.filter((x) => x !== t))}
+            aria-label={`Retirer le tag ${t}`}
+            className="rounded-md border p-0.5"
+            style={{ borderColor: 'var(--border)', color: 'var(--ink-soft)' }}
+          >
+            <X size={12} />
+          </button>
+        </span>
+      ))}
+      <input
+        className="w-32 rounded-lg border px-2 py-1 text-xs"
+        style={styleSaisie}
+        value={neuf}
+        placeholder="+ tag"
+        aria-label="Ajouter un tag"
+        onChange={(e) => setNeuf(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && ajouter()}
+        onBlur={ajouter}
+      />
+    </div>
+  );
+}
+
 /* Carte d'une liste éditable : jeunes, éducateurs, activités, salles.
 
    Les quatre se ressemblent au point que les écrire séparément ferait quatre
@@ -2697,16 +2807,20 @@ function CarteEditable({
   onSecondaire,
   onSupprimer,
   onAjouter,
+  details,
 }) {
   const [nom, setNom] = useState('');
-  const [valeur, setValeur] = useState(secondaire.defaut);
+  const [valeur, setValeur] = useState(secondaire?.defaut ?? '');
   const [erreur, setErreur] = useState(null);
+  // Un id, pas l'entrée : la structure est remplacée à chaque modification, et
+  // garder l'objet refermerait le panneau à la première frappe.
+  const [ouvert, setOuvert] = useState(null);
 
   const ajouter = () => {
     if (!nom.trim()) return;
     onAjouter(nom.trim(), valeur);
     setNom('');
-    setValeur(secondaire.defaut);
+    setValeur(secondaire?.defaut ?? '');
   };
 
   /* Une suppression peut être refusée par le moteur — une activité encore
@@ -2722,7 +2836,7 @@ function CarteEditable({
   };
 
   const champSecondaire = (val, onChange, aria) =>
-    secondaire.options ? (
+    secondaire?.options ? (
       <select
         className="w-32 rounded-lg border px-2 py-1 text-sm"
         style={styleSaisie}
@@ -2766,9 +2880,22 @@ function CarteEditable({
           {entrees.map((entree) => (
             <div
               key={entree.id}
-              className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm"
+              className="rounded-lg border px-3 py-2 text-sm"
               style={{ borderColor: 'var(--border)' }}
             >
+             <div className="flex items-center gap-2">
+              {details && (
+                <button
+                  type="button"
+                  onClick={() => setOuvert(ouvert === entree.id ? null : entree.id)}
+                  aria-label={`Détails de ${entree.nom}`}
+                  aria-expanded={ouvert === entree.id}
+                  className="shrink-0 rounded-lg border p-1"
+                  style={{ borderColor: 'var(--border)', color: 'var(--ink-soft)' }}
+                >
+                  {ouvert === entree.id ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                </button>
+              )}
               <input
                 className="min-w-0 flex-1 rounded-lg border px-2 py-1 text-sm"
                 style={styleSaisie}
@@ -2776,10 +2903,28 @@ function CarteEditable({
                 aria-label={`Nom de ${entree.nom}`}
                 onChange={(e) => onRenommer(entree, e.target.value)}
               />
-              {champSecondaire(entree.valeur, (v) => onSecondaire(entree, v), `${secondaire.libelle} de ${entree.nom}`)}
-              <span className="shrink-0 text-xs" style={{ color: 'var(--ink-soft)' }}>
-                {secondaire.unite}
-              </span>
+              {secondaire ? (
+                <>
+                  {champSecondaire(
+                    entree.valeur,
+                    (v) => onSecondaire(entree, v),
+                    `${secondaire.libelle} de ${entree.nom}`,
+                  )}
+                  <span className="shrink-0 text-xs" style={{ color: 'var(--ink-soft)' }}>
+                    {secondaire.unite}
+                  </span>
+                </>
+              ) : (
+                // Sans champ secondaire, la valeur se LIT. Un `<input>` qu'on
+                // peut modifier sans effet est pire que pas de champ du tout :
+                // l'effectif d'un groupe se déduit de `jeune.groupeId`, il ne
+                // se saisit pas ici.
+                entree.valeur && (
+                  <span className="shrink-0 text-xs" style={{ color: 'var(--ink-soft)' }}>
+                    {entree.valeur}
+                  </span>
+                )
+              )}
               <button
                 type="button"
                 onClick={() => supprimer(entree)}
@@ -2789,6 +2934,12 @@ function CarteEditable({
               >
                 <Trash2 size={14} />
               </button>
+             </div>
+             {details && ouvert === entree.id && (
+               <div className="mt-3 border-t pt-3" style={{ borderColor: 'var(--border)' }}>
+                 {details(entree)}
+               </div>
+             )}
             </div>
           ))}
         </div>
@@ -2807,11 +2958,13 @@ function CarteEditable({
             />
           </Champ>
         </div>
-        <div className="w-32">
-          <Champ libelle={secondaire.libelle}>
-            {champSecondaire(valeur, setValeur, `${secondaire.libelle} du nouvel élément`)}
-          </Champ>
-        </div>
+        {secondaire && (
+          <div className="w-32">
+            <Champ libelle={secondaire.libelle}>
+              {champSecondaire(valeur, setValeur, `${secondaire.libelle} du nouvel élément`)}
+            </Champ>
+          </div>
+        )}
         <Bouton variante="primaire" icone={Plus} onClick={ajouter} disabled={!nom.trim()}>
           Ajouter
         </Bouton>
@@ -2862,6 +3015,44 @@ function CarteJeunes({ structure, setStructure }) {
           }),
         )
       }
+      details={(e) => {
+        const j = structure.jeunes.find((x) => x.id === e.id);
+        if (!j) return null;
+        const maj = (c) => setStructure(modifieJeune(structure, j.id, c));
+        return (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-4">
+              <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--ink)' }}>
+                <input type="checkbox" checked={j.actif} onChange={() => maj({ actif: !j.actif })} />
+                accueilli cette année
+              </label>
+              <div className="w-56">
+                <Champ libelle="Groupe">
+                  <Selecteur
+                    valeur={j.groupeId ?? ''}
+                    onChange={(v) => maj({ groupeId: v === '' ? undefined : v })}
+                    options={[
+                      { valeur: '', libelle: 'aucun' },
+                      ...structure.groupes.map((g) => ({ valeur: g.id, libelle: g.nom })),
+                    ]}
+                  />
+                </Champ>
+              </div>
+            </div>
+            <div>
+              <Etiquette>Présence</Etiquette>
+              <div className="mt-1">
+                <SemaineDePlages
+                  jours={structure.grille.jours}
+                  semaine={j.presence}
+                  bornes={{ debut: structure.grille.debut, fin: structure.grille.fin }}
+                  onChange={(presence) => maj({ presence })}
+                />
+              </div>
+            </div>
+          </div>
+        );
+      }}
     />
   );
 }
@@ -2900,6 +3091,51 @@ function CarteEducateurs({ structure, setStructure }) {
           }),
         )
       }
+      details={(entree) => {
+        const e = structure.educateurs.find((x) => x.id === entree.id);
+        if (!e) return null;
+        const maj = (c) => setStructure(modifieEducateur(structure, e.id, c));
+        return (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-end gap-4">
+              <div className="w-48">
+                <Champ libelle="Prénom" aide="affiché à côté du nom quand il est renseigné">
+                  <input
+                    type="text"
+                    className="w-full rounded-xl border px-3 py-2 text-sm"
+                    style={styleSaisie}
+                    value={e.prenom ?? ''}
+                    onChange={(ev) => maj({ prenom: ev.target.value || undefined })}
+                  />
+                </Champ>
+              </div>
+              <label className="flex items-center gap-2 pb-2 text-sm" style={{ color: 'var(--ink)' }}>
+                <input type="checkbox" checked={e.actif} onChange={() => maj({ actif: !e.actif })} />
+                en poste
+              </label>
+              <label className="flex items-center gap-2 pb-2 text-sm" style={{ color: 'var(--ink)' }}>
+                <input
+                  type="checkbox"
+                  checked={e.detachable !== false}
+                  onChange={() => maj({ detachable: e.detachable === false })}
+                />
+                détachable
+              </label>
+            </div>
+            <div>
+              <Etiquette>Disponibilités</Etiquette>
+              <div className="mt-1">
+                <SemaineDePlages
+                  jours={structure.grille.jours}
+                  semaine={e.disponibilites}
+                  bornes={{ debut: structure.grille.debut, fin: structure.grille.fin }}
+                  onChange={(disponibilites) => maj({ disponibilites })}
+                />
+              </div>
+            </div>
+          </div>
+        );
+      }}
     />
   );
 }
@@ -2934,6 +3170,65 @@ function CarteActivites({ structure, setStructure }) {
           }),
         )
       }
+      details={(entree) => {
+        const a = structure.activites.find((x) => x.id === entree.id);
+        if (!a) return null;
+        const maj = (c) => setStructure(modifieActivite(structure, a.id, c));
+        // `educateursRequis: null` n'est PAS `0` : null veut dire « déduit de la
+        // somme des encadrements des jeunes », 0 voudrait dire « aucun éducateur ».
+        const nombreOuNull = (v) => (v === '' ? null : Math.max(0, Number(v) || 0));
+        return (
+          <div className="space-y-3">
+            <dl className="m-0">
+              <ListePersonnes
+                titre="Salles possibles"
+                couleur={CAT_AMBER}
+                ids={a.sallesPossibles ?? []}
+                catalogue={structure.salles.map((x) => ({ id: x.id, nom: x.nom }))}
+                vide={{
+                  texte: structure.salles.length === 0 ? 'aucune salle saisie' : 'toutes',
+                  alerte: false,
+                }}
+                titrePour={() => ''}
+                editable
+                onRetirer={(id) => maj({ sallesPossibles: (a.sallesPossibles ?? []).filter((x) => x !== id) })}
+                onAjouter={(id) => maj({ sallesPossibles: [...(a.sallesPossibles ?? []), id] })}
+              />
+            </dl>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Champ libelle="Tag de salle requis" aide="laisser vide si aucun">
+                <input
+                  type="text"
+                  className="w-full rounded-xl border px-3 py-2 text-sm"
+                  style={styleSaisie}
+                  value={a.tagSalleRequis ?? ''}
+                  onChange={(e) => maj({ tagSalleRequis: e.target.value || null })}
+                />
+              </Champ>
+              <Champ libelle="Capacité en jeunes" aide="vide = pas de limite">
+                <input
+                  type="number"
+                  min="0"
+                  className="w-full rounded-xl border px-3 py-2 text-sm"
+                  style={styleSaisie}
+                  value={a.capaciteJeunes ?? ''}
+                  onChange={(e) => maj({ capaciteJeunes: nombreOuNull(e.target.value) })}
+                />
+              </Champ>
+              <Champ libelle="Éducateurs requis" aide="vide = somme des encadrements des jeunes">
+                <input
+                  type="number"
+                  min="0"
+                  className="w-full rounded-xl border px-3 py-2 text-sm"
+                  style={styleSaisie}
+                  value={a.educateursRequis ?? ''}
+                  onChange={(e) => maj({ educateursRequis: nombreOuNull(e.target.value) })}
+                />
+              </Champ>
+            </div>
+          </div>
+        );
+      }}
     />
   );
 }
@@ -2962,6 +3257,162 @@ function CarteSalles({ structure, setStructure }) {
       onAjouter={(nom, valeur) =>
         setStructure(ajouteSalle(structure, { nom, capacite: Math.max(0, Number(valeur) || 0) }))
       }
+      details={(entree) => {
+        const salle = structure.salles.find((x) => x.id === entree.id);
+        if (!salle) return null;
+        return (
+          <div>
+            <Etiquette>Tags</Etiquette>
+            <p className="mb-1.5 mt-0.5 text-xs" style={{ color: 'var(--ink-soft)' }}>
+              Servent aux règles « salle requise » : une règle peut viser un tag plutôt qu’une liste.
+            </p>
+            <ListeTags
+              tags={salle.tags ?? []}
+              onChange={(tags) => setStructure(modifieSalle(structure, salle.id, { tags }))}
+            />
+          </div>
+        );
+      }}
+    />
+  );
+}
+
+/* Les pauses. Sans un endroit pour les saisir, le correctif du lot des pauses
+   (le moteur n'y affecte personne et n'y réclame aucun encadrement) restait
+   inatteignable pour un planning construit à la main : seul un fichier écrit à
+   la main pouvait en porter. */
+function CartePauses({ structure, setStructure }) {
+  const pauses = structure.grille.pauses ?? [];
+  const minutes = (p) => p.pas * structure.grille.pasMinutes;
+
+  return (
+    <Carte
+      titre={`Pauses (${pauses.length})`}
+      sousTitre="Temps communs : le moteur n’y affecte personne et n’y demande aucun encadrement"
+    >
+      {pauses.length === 0 ? (
+        <Vide>Aucune pause. Un créneau de repas sera encadré comme n’importe quel autre.</Vide>
+      ) : (
+        <div className="space-y-1.5">
+          {pauses.map((p, i) => (
+            <div
+              key={i}
+              className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm"
+              style={{ borderColor: 'var(--border)' }}
+            >
+              <input
+                className="min-w-0 flex-1 rounded-lg border px-2 py-1 text-sm"
+                style={styleSaisie}
+                value={p.libelle}
+                aria-label={`Nom de la pause ${i + 1}`}
+                onChange={(e) => setStructure(modifiePause(structure, i, { libelle: e.target.value }))}
+              />
+              <input
+                type="time"
+                className="rounded-lg border px-2 py-1 text-sm"
+                style={styleSaisie}
+                value={p.debut}
+                aria-label={`Début de la pause ${i + 1}`}
+                onChange={(e) => e.target.value && setStructure(modifiePause(structure, i, { debut: e.target.value }))}
+              />
+              <input
+                type="number"
+                min="1"
+                className="w-16 rounded-lg border px-2 py-1 text-sm"
+                style={styleSaisie}
+                value={p.pas}
+                aria-label={`Durée de la pause ${i + 1}`}
+                onChange={(e) => setStructure(modifiePause(structure, i, { pas: Number(e.target.value) }))}
+              />
+              <span className="shrink-0 text-xs" style={{ color: 'var(--ink-soft)' }}>
+                pas ({minutes(p)} min)
+              </span>
+              <button
+                type="button"
+                onClick={() => setStructure(supprimePause(structure, i))}
+                aria-label={`Supprimer la pause ${i + 1}`}
+                className="rounded-lg border p-1"
+                style={{ borderColor: 'var(--border)', color: 'var(--crisis)' }}
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="mt-3">
+        <Bouton
+          icone={Plus}
+          onClick={() =>
+            setStructure(ajoutePause(structure, { debut: structure.grille.debut, pas: 1, libelle: 'Repas' }))
+          }
+        >
+          Ajouter une pause
+        </Bouton>
+      </div>
+      <p className="mt-2 text-xs" style={{ color: 'var(--ink-soft)' }}>
+        Un créneau <strong>à cheval</strong> sur une pause garde son besoin d’encadrement entier : l’encadrement se
+        calcule par créneau, pas par pas. Pour qu’une moitié seulement soit en pause, coupez le créneau en deux.
+      </p>
+    </Carte>
+  );
+}
+
+function CarteGroupes({ referentiel, structure, setStructure }) {
+  return (
+    <CarteEditable
+      titre="Groupes"
+      sousTitre="Ciblés par les règles de taux d’encadrement et de présence minimale"
+      vide="Aucun groupe. Les règles qui visent un groupe n’auront rien à viser."
+      placeholder="Groupe A"
+      entrees={structure.groupes.map((g) => {
+        const n = referentiel.jeunesDuGroupe(g.id).length;
+        return { id: g.id, nom: g.nom, valeur: `${n} jeune(s)` };
+      })}
+      onRenommer={(e, v) => setStructure(modifieGroupe(structure, e.id, { nom: v }))}
+      onSupprimer={(e) => {
+        const dedans = referentiel.jeunesDuGroupe(e.id).length;
+        if (
+          !confirm(
+            `Supprimer le groupe « ${e.nom} » ?` +
+              (dedans > 0 ? `\n\n${dedans} jeune(s) s’y rattachent : ils se retrouveront sans groupe.` : ''),
+          )
+        )
+          return;
+        setStructure(supprimeGroupe(structure, e.id));
+      }}
+      onAjouter={(nom) => setStructure(ajouteGroupe(structure, { nom, refEducateurs: [] }))}
+      details={(entree) => {
+        const g = structure.groupes.find((x) => x.id === entree.id);
+        if (!g) return null;
+        return (
+          <dl className="m-0">
+            <ListePersonnes
+              titre="Éducateurs de référence"
+              couleur={CAT_TEAL}
+              ids={g.refEducateurs ?? []}
+              catalogue={structure.educateurs
+                .filter((e) => e.actif)
+                .map((e) => ({ id: e.id, nom: referentiel.libelleEducateur(e.id) }))}
+              vide={{ texte: 'aucun', alerte: false }}
+              titrePour={() => ''}
+              editable
+              onRetirer={(id) =>
+                setStructure(
+                  modifieGroupe(structure, g.id, {
+                    refEducateurs: (g.refEducateurs ?? []).filter((x) => x !== id),
+                  }),
+                )
+              }
+              onAjouter={(id) =>
+                setStructure(
+                  modifieGroupe(structure, g.id, { refEducateurs: [...(g.refEducateurs ?? []), id] }),
+                )
+              }
+            />
+          </dl>
+        );
+      }}
     />
   );
 }
@@ -2984,12 +3435,6 @@ function EcranStructure({ referentiel, structure, setStructure }) {
         <p className="text-sm" style={{ color: 'var(--ink)' }}>
           Jours : {s.grille.jours.join(', ')}
         </p>
-        <p className="mt-1 text-sm" style={{ color: 'var(--ink-soft)' }}>
-          Pauses :{' '}
-          {(s.grille.pauses ?? []).length === 0
-            ? 'aucune'
-            : s.grille.pauses.map((p) => `${p.libelle} ${p.debut} (${p.pas} pas)`).join(' · ')}
-        </p>
 
         {/* L'ancre ne se demande que si l'alternance existe : sur un planning
             hebdomadaire, ce champ n'aurait rien à ancrer. */}
@@ -3004,14 +3449,7 @@ function EcranStructure({ referentiel, structure, setStructure }) {
                 className="w-full rounded-xl border px-3 py-2 text-sm"
                 style={styleSaisie}
                 value={s.grille.semaineAOrigine ?? ''}
-                onChange={(e) =>
-                  setStructure({
-                    ...s,
-                    grille: e.target.value
-                      ? { ...s.grille, semaineAOrigine: e.target.value }
-                      : (({ semaineAOrigine, ...reste }) => reste)(s.grille),
-                  })
-                }
+                onChange={(e) => setStructure(fixeSemaineAOrigine(s, e.target.value || null))}
               />
             </Champ>
           </div>
@@ -3028,29 +3466,26 @@ function EcranStructure({ referentiel, structure, setStructure }) {
         <CarteSalles structure={s} setStructure={setStructure} />
       </div>
 
-      {/* Présences, disponibilités et groupes restent en lecture : ils viennent
-          d'un fichier et se saisissent mal dans une liste. */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <Carte titre="Présences et disponibilités" sousTitre="Telles qu'elles arrivent du fichier">
-          <Table
-            colonnes={['qui', 'semaine']}
-            lignes={[
-              ...s.jeunes.map((j) => [j.initiales, semaineEnTexte(j.presence)]),
-              ...s.educateurs.map((e) => [referentiel.libelleEducateur(e.id), semaineEnTexte(e.disponibilites)]),
-            ]}
-          />
-        </Carte>
-        <Carte titre={`Groupes (${s.groupes.length})`}>
-          <Table
-            colonnes={['nom', 'éducateurs de référence', 'jeunes']}
-            lignes={s.groupes.map((g) => [
-              g.nom,
-              (g.refEducateurs ?? []).map((id) => referentiel.libelleEducateur(id)).join(', ') || '—',
-              referentiel.jeunesDuGroupe(g.id).map((j) => j.initiales).join(', ') || '—',
-            ])}
-          />
-        </Carte>
+        <CarteGroupes referentiel={referentiel} structure={s} setStructure={setStructure} />
+        <CartePauses structure={s} setStructure={setStructure} />
       </div>
+
+      {/* Le récapitulatif reste, en lecture : la saisie se fait dans le détail
+          de chaque personne, mais c'est ici qu'on voit la semaine d'un coup
+          d'œil — et qu'un oubli saute aux yeux. */}
+      <Carte
+        titre="Présences et disponibilités"
+        sousTitre="En lecture — elles se saisissent dans le détail de chaque personne, plus haut"
+      >
+        <Table
+          colonnes={['qui', 'semaine']}
+          lignes={[
+            ...s.jeunes.map((j) => [j.initiales, semaineEnTexte(j.presence)]),
+            ...s.educateurs.map((e) => [referentiel.libelleEducateur(e.id), semaineEnTexte(e.disponibilites)]),
+          ]}
+        />
+      </Carte>
     </div>
   );
 }
